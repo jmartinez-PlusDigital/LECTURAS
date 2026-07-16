@@ -104,10 +104,19 @@
         text-align: right;
     }
 
+    table.detalle th.grupo {
+        text-align: center;
+        border-left: 1px solid rgba(255,255,255,0.3);
+    }
+
     table.detalle td {
         padding: 5px 8px;
         border-bottom: 1px solid #e5e5e5;
         font-size: 9pt;
+    }
+
+    table.detalle td.separador {
+        border-left: 1px solid #e5e5e5;
     }
 
     table.detalle tbody tr:nth-child(even) {
@@ -190,10 +199,20 @@
 <table class="detalle">
     <thead>
         <tr>
-            <th>Equipo</th>
-            <th>Marca / Modelo</th>
-            <th class="num">Consumo BN</th>
-            <th class="num">Consumo Color</th>
+            <th rowspan="2">Equipo</th>
+            <th rowspan="2">Marca / Modelo</th>
+            <th class="grupo" colspan="3">Lectura anterior</th>
+            <th class="grupo" colspan="3">Lectura actual</th>
+            <th class="num" rowspan="2">Consumo BN</th>
+            <th class="num" rowspan="2">Consumo Color</th>
+        </tr>
+        <tr>
+            <th class="num">Fecha</th>
+            <th class="num">BN</th>
+            <th class="num">Color</th>
+            <th class="num">Fecha</th>
+            <th class="num">BN</th>
+            <th class="num">Color</th>
         </tr>
     </thead>
     <tbody>
@@ -201,11 +220,17 @@
         <tr>
             <td>{{ fila.numero_serie }}</td>
             <td>{{ fila.marca_modelo }}</td>
-            <td class="num">{{ fila.consumo_bn }}</td>
+            <td class="num separador">{{ fila.fecha_lectura_anterior }}</td>
+            <td class="num">{{ fila.lectura_anterior_bn }}</td>
+            <td class="num">{{ fila.lectura_anterior_color }}</td>
+            <td class="num separador">{{ fila.fecha_lectura_actual }}</td>
+            <td class="num">{{ fila.lectura_actual_bn }}</td>
+            <td class="num">{{ fila.lectura_actual_color }}</td>
+            <td class="num separador">{{ fila.consumo_bn }}</td>
             <td class="num">{{ fila.consumo_color }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="4">Sin equipos con consumo registrado en este periodo.</td></tr>
+        <tr><td colspan="10">Sin equipos con consumo registrado en este periodo.</td></tr>
         {% endfor %}
     </tbody>
 </table>

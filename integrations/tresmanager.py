@@ -17,25 +17,16 @@ class Cliente3Manager(BaseLecturaClient):
 
     Autenticación: OAuth2 "password grant" contra `TOKEN_URL`, con el cuerpo
     en application/x-www-form-urlencoded (NO json). El token dura 5 minutos,
-    así que se pide uno nuevo en cada corrida de `obtener_lecturas()` — el
-    job de sincronización corre una vez al día, no hace falta cachearlo.
+    así que se pide uno nuevo en cada llamada — no hace falta cachearlo, el
+    job de sincronización corre una vez al día.
 
     El `accountId` de 3-Manager es específico por cliente nuestro (no global
-    del sistema), así que se recorre cada `Cliente.id_cuenta_3manager`
-    configurado y se combinan los dispositivos de todas las cuentas.
+    del sistema): se guarda en `Cliente.id_cuenta_3manager`.
 
-    Cada dispositivo se indexa tanto por `serialNumber` como por `deviceId`,
-    para poder emparejar por lo que ya tengamos en `Equipo` (`numero_serie`
-    o `id_externo_3manager`, lo que esté disponible).
-
-    ADVERTENCIA: la documentación de 3-Manager no muestra los nombres JSON
-    exactos de los contadores (solo etiquetas legibles: "Total BW", "Total
-    Color"). Se asume aquí `totalBW`/`totalColor` siguiendo el patrón
-    camelCase del resto de la respuesta — esto debe confirmarse con una
-    llamada real antes de confiar en el dato en producción. Ver también
-    `API_3MANAGER_DEVICES_PATH`: la documentación es inconsistente entre
-    "/devices" (tabla "Overview of API functionality") y "/equipment"
-    (captura de pantalla de ejemplo) — configurable por si el real difiere.
+    Campos de contador verificados contra la API real (cuenta Demant,
+    2026-07-15): `totalBw` (con "w" minúscula) y `totalColor`. Los equipos
+    solo-BN reportan `totalColor: null` (presente, no ausente) — se trata
+    como 0, no se descarta el equipo.
     """
 
     origen = "api_3manager"
@@ -56,12 +47,10 @@ class Cliente3Manager(BaseLecturaClient):
         self.password = password or settings.API_3MANAGER_PASSWORD
         self.timeout = timeout or settings.API_INTEGRATIONS_TIMEOUT
 
+    # --- lecturas (usado por sincronizar_lecturas) --------------------------
+
     def obtener_lecturas(self) -> dict[str, LecturaExterna]:
-        if not (self.base_url and self.tenant and self.username and self.password):
-            raise IntegrationConnectionError(
-                "3-Manager: falta configurar API_3MANAGER_TENANT / "
-                "API_3MANAGER_USERNAME / API_3MANAGER_PASSWORD."
-            )
+        self._validar_config()
 
         from core.models import Cliente  # import diferido: evita ciclo integrations <-> core
 
@@ -73,11 +62,56 @@ class Cliente3Manager(BaseLecturaClient):
             return {}
 
         token = self._obtener_token()
-
         lecturas: dict[str, LecturaExterna] = {}
         for account_id in cuentas:
-            lecturas.update(self._obtener_lecturas_cuenta(account_id, token))
+            payload = self._get_json(
+                self.devices_path.format(account_id=account_id), token, f"cuenta {account_id}"
+            )
+            for item in payload.get("items", []):
+                lectura = self._parse_item(item)
+                if lectura is None:
+                    continue
+                serial = item.get("serialNumber")
+                device_id = item.get("deviceId")
+                if serial:
+                    lecturas[str(serial)] = lectura
+                if device_id:
+                    lecturas[str(device_id)] = lectura
         return lecturas
+
+    # --- aprovisionamiento (usado por acciones del Admin) --------------------
+
+    def buscar_cuentas(self, nombre_contiene: str = "") -> list[dict]:
+        """Cuentas (orgunits tipo "Account") de 3-Manager, filtradas por
+        substring de nombre (case-insensitive) si se da `nombre_contiene`."""
+        self._validar_config()
+        token = self._obtener_token()
+        payload = self._get_json("/public/orgunits", token, "orgunits")
+        items = payload.get("items", payload) if isinstance(payload, dict) else payload
+        cuentas = [item for item in items if item.get("type") == "Account"]
+        if nombre_contiene:
+            nombre_lower = nombre_contiene.lower()
+            cuentas = [c for c in cuentas if nombre_lower in str(c.get("name", "")).lower()]
+        return cuentas
+
+    def listar_dispositivos(self, account_id: str) -> list[dict]:
+        """Lista cruda de dispositivos de una cuenta (para crear Equipo, no
+        solo lecturas)."""
+        self._validar_config()
+        token = self._obtener_token()
+        payload = self._get_json(
+            self.devices_path.format(account_id=account_id), token, f"cuenta {account_id}"
+        )
+        return payload.get("items", [])
+
+    # --- helpers internos ----------------------------------------------------
+
+    def _validar_config(self) -> None:
+        if not (self.base_url and self.tenant and self.username and self.password):
+            raise IntegrationConnectionError(
+                "3-Manager: falta configurar API_3MANAGER_TENANT / "
+                "API_3MANAGER_USERNAME / API_3MANAGER_PASSWORD."
+            )
 
     def _obtener_token(self) -> str:
         try:
@@ -106,36 +140,21 @@ class Cliente3Manager(BaseLecturaClient):
             raise IntegrationConnectionError("3-Manager: la respuesta de /token no incluyó access_token.")
         return token
 
-    def _obtener_lecturas_cuenta(self, account_id: str, token: str) -> dict[str, LecturaExterna]:
+    def _get_json(self, path: str, token: str, contexto: str) -> dict:
         try:
             response = requests.get(
-                f"{self.base_url}{self.devices_path.format(account_id=account_id)}",
+                f"{self.base_url}{path}",
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
                 timeout=self.timeout,
             )
             response.raise_for_status()
-            payload = response.json()
+            return response.json()
         except requests.RequestException as exc:
-            raise IntegrationConnectionError(
-                f"3-Manager: fallo de conexión (cuenta {account_id}) — {exc}"
-            ) from exc
+            raise IntegrationConnectionError(f"3-Manager: fallo de conexión ({contexto}) — {exc}") from exc
         except ValueError as exc:
             raise IntegrationConnectionError(
-                f"3-Manager: respuesta no es JSON válido (cuenta {account_id}) — {exc}"
+                f"3-Manager: respuesta no es JSON válido ({contexto}) — {exc}"
             ) from exc
-
-        lecturas: dict[str, LecturaExterna] = {}
-        for item in payload.get("items", []):
-            lectura = self._parse_item(item)
-            if lectura is None:
-                continue
-            serial = item.get("serialNumber")
-            device_id = item.get("deviceId")
-            if serial:
-                lecturas[str(serial)] = lectura
-            if device_id:
-                lecturas[str(device_id)] = lectura
-        return lecturas
 
     def _parse_item(self, item: dict) -> LecturaExterna | None:
         identificador = item.get("serialNumber") or item.get("deviceId")

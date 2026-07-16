@@ -1,0 +1,88 @@
+{% extends "admin/base_site.html" %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Inicio</a>
+    &rsaquo; <a href="{% url 'admin:core_lectura_changelist' %}">Lecturas</a>
+    &rsaquo; Importar lecturas
+</div>
+{% endblock %}
+
+{% block content %}
+<style>
+    .importar-lecturas .ayuda { max-width: 780px; margin-bottom: 16px; }
+    .importar-lecturas table.resultados { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    .importar-lecturas table.resultados th,
+    .importar-lecturas table.resultados td { border: 1px solid #ccc; padding: 4px 8px; font-size: 12.5px; text-align: left; }
+    .importar-lecturas table.resultados th { background: #f4f4f4; }
+    .importar-lecturas tr.fila-error td { background: #fff2f2; }
+    .importar-lecturas .resumen-cifras { margin: 10px 0; }
+    .importar-lecturas .resumen-cifras span { margin-right: 18px; }
+</style>
+
+<div id="content-main" class="importar-lecturas">
+    <div class="ayuda">
+        <p>
+            Sube un archivo <strong>.csv</strong> o <strong>.xlsx</strong> con lecturas para cargar en batch.
+            <a href="{% url 'admin:core_lectura_importar_plantilla' %}">Descargar plantilla de ejemplo</a>,
+            o desde <a href="{% url 'admin:core_contrato_changelist' %}">Contratos</a> selecciona uno o varios
+            y usa la acción &ldquo;Facturación: descargar plantilla de lecturas&rdquo; para bajarla ya
+            pre-llenada con los números de serie de sus equipos.
+        </p>
+        <p>
+            Columnas: <code>numero_serie</code> (requerido), <code>fecha</code> (opcional, YYYY-MM-DD;
+            si se omite se usa hoy), <code>lectura_bn</code> (requerido), <code>lectura_color</code> (requerido),
+            <code>numero_contrato</code> (opcional, solo como validación cruzada). Cada equipo se carga contra
+            su asignación activa, con origen &ldquo;Manual&rdquo;. Si ya existe una lectura para ese equipo en
+            esa fecha, se actualiza en vez de duplicarse.
+        </p>
+    </div>
+
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="form-row">
+            {{ form.archivo.label_tag }} {{ form.archivo }}
+            {% if form.archivo.errors %}<p class="errornote">{{ form.archivo.errors|join:", " }}</p>{% endif %}
+        </div>
+        <div class="form-row">
+            <label for="{{ form.dry_run.id_for_label }}">{{ form.dry_run }} {{ form.dry_run.label }}</label>
+        </div>
+        <div class="submit-row">
+            <input type="submit" value="Procesar archivo" class="default">
+        </div>
+    </form>
+
+    {% if resumen %}
+    <h2>Resultado</h2>
+    <div class="resumen-cifras">
+        <span><strong>Filas procesadas:</strong> {{ resumen.total }}</span>
+        <span><strong>Lecturas creadas:</strong> {{ resumen.creadas }}</span>
+        <span><strong>Lecturas actualizadas:</strong> {{ resumen.actualizadas }}</span>
+        <span><strong>Con error:</strong> {{ resumen.con_error|length }}</span>
+    </div>
+
+    <table class="resultados">
+        <thead>
+            <tr>
+                <th>Fila</th>
+                <th>N&uacute;mero de serie</th>
+                <th>Fecha</th>
+                <th>Lectura</th>
+                <th>Error</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in resultados %}
+            <tr class="{% if r.error %}fila-error{% endif %}">
+                <td>{{ r.fila }}</td>
+                <td>{{ r.numero_serie }}</td>
+                <td>{{ r.fecha }}</td>
+                <td>{{ r.lectura }}</td>
+                <td>{{ r.error }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endblock %}

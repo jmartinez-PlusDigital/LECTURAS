@@ -4,6 +4,7 @@ Mantener esta lógica en un solo lugar evita que ambos motores diverjan en cómo
 interpretan rollover de contador o el primer mes de una asignación nueva.
 """
 from dataclasses import dataclass
+from datetime import date
 
 from core.models import Asignacion, Lectura
 
@@ -15,14 +16,17 @@ class ResultadoConsumo:
     lectura_invertida_bn: bool
     lectura_invertida_color: bool
     es_primera_lectura_asignacion: bool
+    anterior_bn: int
+    anterior_color: int
+    fecha_anterior: date
 
 
-def lectura_anterior(asignacion: Asignacion, lectura: Lectura) -> tuple[int, int, bool]:
-    """Devuelve (lectura_bn_anterior, lectura_color_anterior, es_primer_punto).
+def lectura_anterior(asignacion: Asignacion, lectura: Lectura) -> tuple[int, int, bool, date]:
+    """Devuelve (lectura_bn_anterior, lectura_color_anterior, es_primer_punto, fecha_anterior).
 
     Si existe una Lectura previa (por fecha) en la misma asignación se usa esa.
     Si no existe ninguna —primer mes de la asignación— se usa la lectura de
-    referencia capturada al crear la asignación.
+    referencia capturada al crear la asignación, con fecha_inicio como fecha.
     """
     anterior = (
         Lectura.objects.filter(asignacion=asignacion, fecha__lt=lectura.fecha)
@@ -30,11 +34,12 @@ def lectura_anterior(asignacion: Asignacion, lectura: Lectura) -> tuple[int, int
         .first()
     )
     if anterior is not None:
-        return anterior.lectura_bn, anterior.lectura_color, False
+        return anterior.lectura_bn, anterior.lectura_color, False, anterior.fecha
     return (
         asignacion.lectura_inicial_referencia_bn,
         asignacion.lectura_inicial_referencia_color,
         True,
+        asignacion.fecha_inicio,
     )
 
 
@@ -55,7 +60,7 @@ def calcular_consumo(asignacion: Asignacion, lectura: Lectura) -> ResultadoConsu
     rollover válido, el consumo se reporta en 0 y se marca `lectura_invertida_*`
     para que el llamador decida cómo bloquear/alertar.
     """
-    anterior_bn, anterior_color, es_primera = lectura_anterior(asignacion, lectura)
+    anterior_bn, anterior_color, es_primera, fecha_anterior = lectura_anterior(asignacion, lectura)
     equipo = asignacion.equipo
 
     consumo_bn, invertida_bn = _calcular_categoria(
@@ -71,4 +76,7 @@ def calcular_consumo(asignacion: Asignacion, lectura: Lectura) -> ResultadoConsu
         lectura_invertida_bn=invertida_bn,
         lectura_invertida_color=invertida_color,
         es_primera_lectura_asignacion=es_primera,
+        anterior_bn=anterior_bn,
+        anterior_color=anterior_color,
+        fecha_anterior=fecha_anterior,
     )

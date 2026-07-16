@@ -37,7 +37,18 @@ def generar_excel_factura(resultado: ResultadoFacturacion, contrato: Contrato) -
     ws["B4"] = f"{resultado.fecha_inicio.strftime('%d/%m/%Y')} - {resultado.fecha_fin.strftime('%d/%m/%Y')}"
 
     fila_encabezado_tabla = 6
-    encabezados = ["Número de serie", "Marca / Modelo", "Consumo BN", "Consumo Color"]
+    encabezados = [
+        "Número de serie",
+        "Marca / Modelo",
+        "Fecha lect. anterior",
+        "Lect. anterior BN",
+        "Lect. anterior Color",
+        "Fecha lect. actual",
+        "Lect. actual BN",
+        "Lect. actual Color",
+        "Consumo BN",
+        "Consumo Color",
+    ]
     for col, texto in enumerate(encabezados, start=1):
         celda = ws.cell(row=fila_encabezado_tabla, column=col, value=texto)
         celda.font = fuente_encabezado_tabla
@@ -54,10 +65,16 @@ def generar_excel_factura(resultado: ResultadoFacturacion, contrato: Contrato) -
     for consumo in resultado.consumo_por_equipo:
         ws.cell(row=fila, column=1, value=consumo.equipo_numero_serie)
         ws.cell(row=fila, column=2, value=marcas_modelos.get(consumo.equipo_numero_serie, ""))
-        ws.cell(row=fila, column=3, value=consumo.consumo_bn)
-        ws.cell(row=fila, column=4, value=consumo.consumo_color)
+        ws.cell(row=fila, column=3, value=consumo.fecha_lectura_anterior.strftime("%d/%m/%Y"))
+        ws.cell(row=fila, column=4, value=consumo.lectura_anterior_bn)
+        ws.cell(row=fila, column=5, value=consumo.lectura_anterior_color)
+        ws.cell(row=fila, column=6, value=consumo.fecha_lectura_actual.strftime("%d/%m/%Y"))
+        ws.cell(row=fila, column=7, value=consumo.lectura_actual_bn)
+        ws.cell(row=fila, column=8, value=consumo.lectura_actual_color)
+        ws.cell(row=fila, column=9, value=consumo.consumo_bn)
+        ws.cell(row=fila, column=10, value=consumo.consumo_color)
         if fila % 2 == 0:
-            for col in range(1, 5):
+            for col in range(1, 11):
                 ws.cell(row=fila, column=col).fill = relleno_alterno
         fila += 1
 
@@ -84,7 +101,7 @@ def generar_excel_factura(resultado: ResultadoFacturacion, contrato: Contrato) -
             celda_valor.font = Font(bold=True, size=12, color=AZUL_OSCURO)
         fila += 1
 
-    anchos = [18, 28, 14, 14]
+    anchos = [18, 28, 16, 15, 17, 16, 14, 16, 12, 14]
     for i, ancho in enumerate(anchos, start=1):
         ws.column_dimensions[get_column_letter(i)].width = ancho
 

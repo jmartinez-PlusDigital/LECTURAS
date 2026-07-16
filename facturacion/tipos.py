@@ -9,6 +9,12 @@ class ConsumoEquipo:
     equipo_numero_serie: str
     consumo_bn: int
     consumo_color: int
+    lectura_anterior_bn: int
+    lectura_anterior_color: int
+    fecha_lectura_anterior: date
+    lectura_actual_bn: int
+    lectura_actual_color: int
+    fecha_lectura_actual: date
 
 
 @dataclass
@@ -40,6 +46,12 @@ class ResultadoFacturacion:
                     "equipo": c.equipo_numero_serie,
                     "consumo_bn": c.consumo_bn,
                     "consumo_color": c.consumo_color,
+                    "lectura_anterior_bn": c.lectura_anterior_bn,
+                    "lectura_anterior_color": c.lectura_anterior_color,
+                    "fecha_lectura_anterior": str(c.fecha_lectura_anterior),
+                    "lectura_actual_bn": c.lectura_actual_bn,
+                    "lectura_actual_color": c.lectura_actual_color,
+                    "fecha_lectura_actual": str(c.fecha_lectura_actual),
                 }
                 for c in self.consumo_por_equipo
             ],

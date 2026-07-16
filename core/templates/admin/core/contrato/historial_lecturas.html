@@ -1,0 +1,68 @@
+{% extends "admin/base_site.html" %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Inicio</a>
+    &rsaquo; <a href="{% url 'admin:core_contrato_changelist' %}">Contratos</a>
+    &rsaquo; Historial de lecturas — {{ contrato.numero_contrato }}
+</div>
+{% endblock %}
+
+{% block content %}
+<style>
+    .historial-lecturas table.resultados { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    .historial-lecturas table.resultados th,
+    .historial-lecturas table.resultados td { border: 1px solid #ccc; padding: 4px 8px; font-size: 12.5px; text-align: left; }
+    .historial-lecturas table.resultados th { background: #1f3d5c; color: #fff; }
+    .historial-lecturas table.resultados td.num { text-align: right; }
+    .historial-lecturas tr.fila-alerta td { background: #fff8e1; }
+    .historial-lecturas tr.fila-error td { background: #fff2f2; }
+    .historial-lecturas .acciones { margin: 12px 0; }
+</style>
+
+<div id="content-main" class="historial-lecturas">
+    <h1>Historial de lecturas facturadas — {{ contrato.numero_contrato }} ({{ contrato.cliente.nombre }})</h1>
+    <p>Solo se muestran las lecturas que cayeron dentro del periodo de una factura ya emitida.</p>
+
+    <div class="acciones">
+        <a href="{% url 'admin:core_contrato_historial_lecturas_excel' contrato.pk %}" class="button">Descargar Excel</a>
+    </div>
+
+    <table class="resultados">
+        <thead>
+            <tr>
+                <th>Equipo</th>
+                <th>Marca / Modelo</th>
+                <th>Fecha</th>
+                <th class="num">Lectura BN</th>
+                <th class="num">Lectura Color</th>
+                <th class="num">Consumo BN</th>
+                <th class="num">Consumo Color</th>
+                <th>Nota</th>
+                <th>Origen</th>
+                <th>Auditoría</th>
+                <th>Factura (periodo)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for f in filas %}
+            <tr class="{% if f.estado_auditoria == 'error' %}fila-error{% elif f.estado_auditoria == 'alerta' %}fila-alerta{% endif %}">
+                <td>{{ f.equipo_numero_serie }}</td>
+                <td>{{ f.equipo_marca_modelo }}</td>
+                <td>{{ f.fecha|date:"d/m/Y" }}</td>
+                <td class="num">{{ f.lectura_bn }}</td>
+                <td class="num">{{ f.lectura_color }}</td>
+                <td class="num">{{ f.consumo_bn }}</td>
+                <td class="num">{{ f.consumo_color }}</td>
+                <td>{% if f.es_primera_lectura %}Contra lectura de referencia inicial{% endif %}</td>
+                <td>{{ f.origen }}</td>
+                <td>{{ f.estado_auditoria }}</td>
+                <td>{{ f.factura_periodo }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="11">Este contrato no tiene lecturas facturadas todavía.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

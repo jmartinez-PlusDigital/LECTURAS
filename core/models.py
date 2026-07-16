@@ -62,7 +62,6 @@ class Contrato(TimestampedModel):
     dia_corte_facturacion = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(31)]
     )
-    carpeta_drive_destino_id = models.CharField(max_length=255, blank=True)
     estado = models.CharField(max_length=20, choices=Estado.choices, default=Estado.ACTIVO)
     fecha_inicio = models.DateField()
     fecha_fin = models.DateField(null=True, blank=True)
@@ -170,6 +169,10 @@ class Lectura(TimestampedModel):
         return f"{self.asignacion.equipo} @ {self.fecha}"
 
 
+def _ruta_documento_factura(instance, filename):
+    return f"facturas/{instance.contrato.numero_contrato}/{instance.periodo_anio}-{instance.periodo_mes:02d}/{filename}"
+
+
 class Factura(TimestampedModel):
     class Estado(models.TextChoices):
         OK = "ok", "Ok"
@@ -181,14 +184,20 @@ class Factura(TimestampedModel):
         validators=[MinValueValidator(1), MaxValueValidator(12)]
     )
     periodo_anio = models.PositiveIntegerField()
+    fecha_inicio = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Inicio real del rango de lecturas facturado. Ancla el siguiente periodo (ver core.procesamiento_facturacion).",
+    )
+    fecha_fin = models.DateField(null=True, blank=True, help_text="Fin real del rango de lecturas facturado.")
     consumo_excedente_bn = models.PositiveIntegerField(default=0)
     consumo_excedente_color = models.PositiveIntegerField(default=0)
     monto_renta = models.DecimalField(max_digits=10, decimal_places=2)
     monto_excedente = models.DecimalField(max_digits=10, decimal_places=2)
     monto_iva = models.DecimalField(max_digits=10, decimal_places=2)
     monto_total = models.DecimalField(max_digits=10, decimal_places=2)
-    pdf_url = models.URLField(blank=True)
-    excel_url = models.URLField(blank=True)
+    pdf_archivo = models.FileField(upload_to=_ruta_documento_factura, blank=True)
+    excel_archivo = models.FileField(upload_to=_ruta_documento_factura, blank=True)
     estado = models.CharField(max_length=20, choices=Estado.choices, default=Estado.PENDIENTE)
     fecha_generacion = models.DateTimeField(null=True, blank=True)
 

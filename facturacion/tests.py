@@ -1,7 +1,9 @@
+import shutil
+import tempfile
 from datetime import date
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from core.models import Asignacion, Cliente, Contrato, Equipo, Factura, Lectura
 from facturacion import calcular_factura, persistir_factura
@@ -123,7 +125,10 @@ class FacturacionTestCase(TestCase):
         self.assertIsNone(resultado.factura)
         self.assertFalse(Factura.objects.filter(contrato=self.contrato).exists())
 
-    def test_persistir_factura_crea_registro_con_urls(self):
+    def test_persistir_factura_crea_registro_con_archivos(self):
+        media_root_temporal = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, media_root_temporal, ignore_errors=True)
+
         equipo = self._equipo("SN-FAC-6")
         asignacion = self._asignacion(equipo)
         Lectura.objects.create(
@@ -131,11 +136,13 @@ class FacturacionTestCase(TestCase):
         )
 
         resultado = calcular_factura(self.contrato, date(2026, 1, 1), date(2026, 1, 31), 1, 2026)
-        factura = persistir_factura(
-            resultado, pdf_url="https://drive.example/factura.pdf", excel_url="https://drive.example/factura.xlsx"
-        )
+        with override_settings(MEDIA_ROOT=media_root_temporal):
+            factura = persistir_factura(
+                resultado, pdf_bytes=b"contenido-pdf-falso", excel_bytes=b"contenido-excel-falso"
+            )
 
-        self.assertEqual(Factura.objects.filter(contrato=self.contrato).count(), 1)
-        self.assertEqual(factura.estado, Factura.Estado.OK)
-        self.assertEqual(factura.pdf_url, "https://drive.example/factura.pdf")
-        self.assertEqual(factura.monto_total, resultado.monto_total)
+            self.assertEqual(Factura.objects.filter(contrato=self.contrato).count(), 1)
+            self.assertEqual(factura.estado, Factura.Estado.OK)
+            self.assertTrue(factura.pdf_archivo.name.endswith(".pdf"))
+            self.assertEqual(factura.pdf_archivo.read(), b"contenido-pdf-falso")
+            self.assertEqual(factura.monto_total, resultado.monto_total)

@@ -8,13 +8,14 @@ excedente sobre lo incluido, y aplica IVA.
 
 `simulacion=True` (default) no toca la base de datos. `simulacion=False`
 además persiste la Factura. El orquestador de facturación (módulo 8) llama
-esta función en modo simulación para generar los documentos, y solo si la
-subida a Drive tiene éxito invoca `persistir_factura` directamente (con las
-URLs ya conocidas) dentro de su propia transacción atómica.
+esta función en modo simulación para generar los documentos, y luego invoca
+`persistir_factura` directamente (con los bytes del PDF/Excel ya generados)
+dentro de su propia transacción atómica.
 """
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
+from django.core.files.base import ContentFile
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -60,7 +61,9 @@ def _calcular(
 
         consumo_bn = 0
         consumo_color = 0
-        hubo_lecturas_validas = False
+        primera_lectura_valida = None
+        primer_resultado_consumo = None
+        ultima_lectura_valida = None
         for lectura in lecturas:
             fuera_de_vigencia = lectura.fecha < asignacion.fecha_inicio or (
                 asignacion.fecha_fin is not None and lectura.fecha > asignacion.fecha_fin
@@ -71,15 +74,24 @@ def _calcular(
             resultado_consumo = calcular_consumo(asignacion, lectura)
             consumo_bn += resultado_consumo.consumo_bn
             consumo_color += resultado_consumo.consumo_color
-            hubo_lecturas_validas = True
+            if primera_lectura_valida is None:
+                primera_lectura_valida = lectura
+                primer_resultado_consumo = resultado_consumo
+            ultima_lectura_valida = lectura
 
-        if hubo_lecturas_validas:
+        if primera_lectura_valida is not None:
             consumo_por_equipo.append(
                 ConsumoEquipo(
                     asignacion_id=asignacion.id,
                     equipo_numero_serie=asignacion.equipo.numero_serie,
                     consumo_bn=consumo_bn,
                     consumo_color=consumo_color,
+                    lectura_anterior_bn=primer_resultado_consumo.anterior_bn,
+                    lectura_anterior_color=primer_resultado_consumo.anterior_color,
+                    fecha_lectura_anterior=primer_resultado_consumo.fecha_anterior,
+                    lectura_actual_bn=ultima_lectura_valida.lectura_bn,
+                    lectura_actual_color=ultima_lectura_valida.lectura_color,
+                    fecha_lectura_actual=ultima_lectura_valida.fecha,
                 )
             )
             total_consumo_bn += consumo_bn
@@ -121,31 +133,40 @@ def _redondear(valor: Decimal) -> Decimal:
 def persistir_factura(
     resultado: ResultadoFacturacion,
     *,
-    pdf_url: str = "",
-    excel_url: str = "",
+    pdf_bytes: bytes | None = None,
+    excel_bytes: bytes | None = None,
     estado: str = Factura.Estado.OK,
 ) -> Factura:
     """Crea (o actualiza) la Factura de un ResultadoFacturacion ya calculado.
 
-    Se usa una vez que los archivos ya fueron subidos exitosamente a Drive;
-    ver el orquestador `procesar_facturacion_diaria`.
+    Si se dan `pdf_bytes`/`excel_bytes` (generados por el módulo `documentos`),
+    se guardan como archivo local en MEDIA_ROOT, descargables desde el Admin.
     """
     factura, _ = Factura.objects.update_or_create(
         contrato_id=resultado.contrato_id,
         periodo_mes=resultado.periodo_mes,
         periodo_anio=resultado.periodo_anio,
         defaults={
+            "fecha_inicio": resultado.fecha_inicio,
+            "fecha_fin": resultado.fecha_fin,
             "consumo_excedente_bn": resultado.consumo_excedente_bn,
             "consumo_excedente_color": resultado.consumo_excedente_color,
             "monto_renta": resultado.monto_renta,
             "monto_excedente": resultado.monto_excedente,
             "monto_iva": resultado.monto_iva,
             "monto_total": resultado.monto_total,
-            "pdf_url": pdf_url,
-            "excel_url": excel_url,
             "estado": estado,
             "fecha_generacion": timezone.now(),
         },
     )
+
+    nombre_base = f"{factura.contrato.numero_contrato}_{factura.periodo_anio}-{factura.periodo_mes:02d}"
+    if pdf_bytes is not None:
+        factura.pdf_archivo.save(f"{nombre_base}.pdf", ContentFile(pdf_bytes), save=False)
+    if excel_bytes is not None:
+        factura.excel_archivo.save(f"{nombre_base}.xlsx", ContentFile(excel_bytes), save=False)
+    if pdf_bytes is not None or excel_bytes is not None:
+        factura.save(update_fields=["pdf_archivo", "excel_archivo"])
+
     resultado.factura = factura
     return factura
