@@ -1,0 +1,18 @@
+{% load i18n %}
+{% comment %}
+Select compacto en vez de una lista de enlaces: con cientos de clientes o
+contratos, una lista de <a> por opción se vuelve inmanejable. El <select>
+nativo escala bien (scroll propio del navegador) y no depende del widget
+select2 de Jazzmin, que confunde dos filtros cuando la ruta de campo de uno
+es prefijo de otra (p. ej. "asignaciones__contrato" y
+"asignaciones__contrato__cliente"). choice.query_string viene directo de
+Django, sin pasar por esa lógica.
+{% endcomment %}
+<div class="pd-filter">
+    <label class="pd-filter-title">{{ title }}</label>
+    <select class="pd-filter-select" onchange="if(this.value){window.location.href=this.value;}">
+        {% for choice in choices %}
+        <option value="{{ choice.query_string|iriencode }}" {% if choice.selected %}selected{% endif %}>{{ choice.display }}</option>
+        {% endfor %}
+    </select>
+</div>

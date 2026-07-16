@@ -1,0 +1,170 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block bodyclass %}{{ block.super }} dashboard pd-dashboard{% endblock %}
+
+{% block content_title %}{% trans 'Inicio' %}{% endblock %}
+
+{% block breadcrumbs %}{% endblock %}
+
+{% block content %}
+<div class="col-12 pd-dashboard-wrap">
+
+    <div class="pd-content-head">
+        <div>
+            <h1>{% blocktrans with nombre=request.user.first_name|default:request.user.username %}Hola, {{ nombre }}{% endblocktrans %}</h1>
+            <div class="pd-sub">{{ hoy|date:"l j \d\e F \d\e Y" }}</div>
+        </div>
+        <div class="pd-quick-actions">
+            <a class="btn btn-outline-secondary" href="{% url 'admin:core_lectura_importar' %}">{% trans 'Importar lecturas' %}</a>
+        </div>
+    </div>
+
+    <div class="pd-kpis">
+        <div class="pd-kpi">
+            <div class="pd-kpi-label">{% trans 'Contratos activos' %}</div>
+            <div class="pd-kpi-value">{{ contratos_activos_count }}</div>
+        </div>
+        <div class="pd-kpi">
+            <div class="pd-kpi-label">{% trans 'Por facturar hoy' %}</div>
+            <div class="pd-kpi-value">{{ contratos_hoy|length }}</div>
+            <div class="pd-kpi-delta">{% trans 'corte del día' %} {{ hoy.day }}</div>
+        </div>
+        <div class="pd-kpi">
+            <div class="pd-kpi-label">{% trans 'Alertas pendientes' %}</div>
+            <div class="pd-kpi-value">{{ alertas_pendientes|length }}</div>
+            {% if alertas_pendientes %}<div class="pd-kpi-delta pd-warn">{% trans 'requieren revisión antes de facturar' %}</div>{% endif %}
+        </div>
+        <div class="pd-kpi">
+            <div class="pd-kpi-label">{% trans 'Facturado este mes' %}</div>
+            <div class="pd-kpi-value">${{ facturado_mes|floatformat:2 }}</div>
+            <div class="pd-kpi-delta">{{ facturas_mes_count }} {% trans 'facturas emitidas' %}</div>
+        </div>
+    </div>
+
+    <div class="pd-panels">
+        <div class="pd-panel pd-panel-full">
+            <div class="pd-panel-head">
+                <h2>{% trans 'Contratos por facturar hoy' %}</h2>
+                <span class="pd-hint">{% trans 'día de corte' %} = {{ hoy.day }}</span>
+            </div>
+            <div class="pd-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{% trans 'Contrato' %}</th>
+                            <th>{% trans 'Cliente' %}</th>
+                            <th>{% trans 'Última factura' %}</th>
+                            <th class="num">{% trans 'Equipos' %}</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for contrato in contratos_hoy %}
+                        <tr>
+                            <td class="mono">{{ contrato.numero_contrato }}</td>
+                            <td>{{ contrato.cliente.nombre }}</td>
+                            <td>
+                                {% if contrato.ultima_factura %}
+                                    {{ contrato.ultima_factura.fecha_fin|date:"d/m/Y" }}
+                                    <span class="pd-sub-cell">${{ contrato.ultima_factura.monto_total|floatformat:2 }}</span>
+                                {% else %}
+                                    {% trans 'Sin facturas previas' %}<span class="pd-sub-cell">{% trans 'primer corte' %}</span>
+                                {% endif %}
+                            </td>
+                            <td class="num">{{ contrato.equipos_activos }}</td>
+                            <td>
+                                {% if perms.core.change_contrato %}
+                                <form method="post" action="{% url 'dashboard-facturar-ahora' contrato.id %}">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-sm btn-primary">{% trans 'Facturar ahora' %}</button>
+                                </form>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="5">{% trans 'No hay contratos con corte hoy.' %}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="pd-panel">
+            <div class="pd-panel-head">
+                <h2>{% trans 'Alertas de auditoría' %}</h2>
+                <span class="pd-hint">{% trans 'bloquean la factura' %}</span>
+            </div>
+            <div class="pd-table-wrap">
+                <table>
+                    <thead><tr><th>{% trans 'Contrato' %}</th><th>{% trans 'Motivo' %}</th><th></th></tr></thead>
+                    <tbody>
+                        {% for log in alertas_pendientes %}
+                        <tr>
+                            <td class="mono">{{ log.contrato.numero_contrato }}</td>
+                            <td>
+                                {% for alerta in log.alertas_bloqueantes %}
+                                    <span class="pd-chip pd-chip-crit">{{ alerta.candado }}</span>
+                                    <span class="pd-sub-cell">{{ alerta.mensaje }}</span>
+                                {% empty %}
+                                    <span class="pd-chip pd-chip-pending">{% trans 'pendiente' %}</span>
+                                {% endfor %}
+                            </td>
+                            <td><a class="btn btn-sm btn-outline-secondary" href="{% url 'admin:core_contrato_historial_lecturas' log.contrato.id %}">{% trans 'Revisar' %}</a></td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="3">{% trans 'Sin alertas pendientes.' %}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="pd-panel">
+            <div class="pd-panel-head">
+                <h2>{% trans 'Facturas recientes' %}</h2>
+                <a class="pd-hint" href="{% url 'admin:core_factura_changelist' %}">{% trans 'Ver todas' %}</a>
+            </div>
+            <div class="pd-table-wrap">
+                <table>
+                    <thead><tr><th>{% trans 'Contrato' %}</th><th>{% trans 'Periodo' %}</th><th class="num">{% trans 'Total' %}</th><th></th></tr></thead>
+                    <tbody>
+                        {% for factura in facturas_recientes %}
+                        <tr>
+                            <td>{{ factura.contrato.numero_contrato }} <span class="pd-sub-cell">{{ factura.contrato.cliente.nombre }}</span></td>
+                            <td>{{ factura.periodo_mes|stringformat:"02d" }}/{{ factura.periodo_anio }}</td>
+                            <td class="num">${{ factura.monto_total|floatformat:2 }}</td>
+                            <td>
+                                {% if factura.estado == 'ok' %}<span class="pd-chip pd-chip-ok">Ok</span>
+                                {% elif factura.estado == 'pendiente' %}<span class="pd-chip pd-chip-pending">Pendiente</span>
+                                {% else %}<span class="pd-chip pd-chip-crit">{{ factura.estado }}</span>{% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4">{% trans 'Todavía no hay facturas generadas.' %}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="pd-quick-grid">
+        <a class="pd-quick-card" href="{% url 'admin:core_lectura_importar' %}">
+            <div class="pd-quick-ico"><i class="fas fa-upload"></i></div>
+            <div class="pd-quick-title">{% trans 'Importar lecturas' %}</div>
+            <div class="pd-quick-desc">{% trans 'Subir un archivo de lecturas capturadas' %}</div>
+        </a>
+        <a class="pd-quick-card" href="{% url 'admin:core_contrato_changelist' %}">
+            <div class="pd-quick-ico"><i class="fas fa-file-download"></i></div>
+            <div class="pd-quick-title">{% trans 'Descargar plantilla' %}</div>
+            <div class="pd-quick-desc">{% trans 'Selecciona un contrato y usa la acción de plantilla' %}</div>
+        </a>
+        <a class="pd-quick-card" href="{% url 'admin:core_contrato_changelist' %}">
+            <div class="pd-quick-ico"><i class="fas fa-history"></i></div>
+            <div class="pd-quick-title">{% trans 'Historial de lecturas' %}</div>
+            <div class="pd-quick-desc">{% trans 'Ver lecturas ya facturadas por contrato' %}</div>
+        </a>
+    </div>
+</div>
+{% endblock %}

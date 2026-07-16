@@ -107,6 +107,19 @@ class Equipo(TimestampedModel):
     def __str__(self):
         return f"{self.numero_serie} ({self.marca} {self.modelo})"
 
+    def save(self, *args, **kwargs):
+        # "Ricoh"/"RICOH"/"ricoh" no deben contar como marcas distintas en los
+        # filtros del Admin: se reutiliza la capitalización ya existente en la
+        # base (no se adivina con .title(), que rompería siglas como "HP").
+        if self.marca:
+            self.marca = self.marca.strip()
+            existente = (
+                Equipo.objects.filter(marca__iexact=self.marca).exclude(pk=self.pk).values_list("marca", flat=True).first()
+            )
+            if existente:
+                self.marca = existente
+        super().save(*args, **kwargs)
+
 
 class Asignacion(TimestampedModel):
     equipo = models.ForeignKey(Equipo, on_delete=models.PROTECT, related_name="asignaciones")

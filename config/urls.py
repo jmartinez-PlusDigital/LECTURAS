@@ -19,7 +19,18 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import path
 
+from core.admin import dashboard_view, facturar_uno_ahora_view
+
 urlpatterns = [
+    # Se registran ANTES de admin.site.urls: el panel de inicio propio de
+    # Plus Digital reemplaza al dashboard genérico de Jazzmin (que solo
+    # aplica si estas dos rutas no atrapan la petición primero).
+    path('admin/', admin.site.admin_view(dashboard_view), name='dashboard-inicio'),
+    path(
+        'admin/contratos/<int:contrato_id>/facturar-ahora/',
+        admin.site.admin_view(facturar_uno_ahora_view),
+        name='dashboard-facturar-ahora',
+    ),
     path('admin/', admin.site.urls),
 ]
 

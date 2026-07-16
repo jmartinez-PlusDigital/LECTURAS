@@ -6,11 +6,12 @@ from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import FileResponse, HttpResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 
+from core.dashboard import contexto_dashboard
 from core.historial_lecturas import generar_excel_historial, historial_de_contrato
 from core.importacion_3manager import importar_equipos_de_cliente_3manager
 from core.importacion_equipos import procesar_archivo_equipos
@@ -108,12 +109,10 @@ class ClienteAdmin(admin.ModelAdmin):
     actions = [buscar_cuenta_3manager, importar_equipos_3manager]
 
 
-@admin.action(description="Facturación: facturar ahora (fuerza el corte hoy)")
-def facturar_ahora(modeladmin, request, queryset):
-    contratos = list(queryset.filter(estado=Contrato.Estado.ACTIVO))
-    for contrato in queryset.exclude(estado=Contrato.Estado.ACTIVO):
-        messages.warning(request, f"{contrato.numero_contrato}: no está activo, se omite.")
-
+def _facturar_contratos(request, contratos: list[Contrato]) -> None:
+    """Corre el ciclo de facturación para `contratos` y reporta el resultado
+    vía el framework de mensajes. Usado tanto por la acción masiva del Admin
+    como por el botón "Facturar ahora" de un clic del dashboard."""
     if not contratos:
         return
 
@@ -138,6 +137,35 @@ def facturar_ahora(modeladmin, request, queryset):
             )
         else:
             messages.error(request, f"{resumen['contrato']}: {resumen['detalle']}")
+
+
+@admin.action(description="Facturación: facturar ahora (fuerza el corte hoy)")
+def facturar_ahora(modeladmin, request, queryset):
+    contratos = list(queryset.filter(estado=Contrato.Estado.ACTIVO))
+    for contrato in queryset.exclude(estado=Contrato.Estado.ACTIVO):
+        messages.warning(request, f"{contrato.numero_contrato}: no está activo, se omite.")
+    _facturar_contratos(request, contratos)
+
+
+def dashboard_view(request):
+    """Panel de inicio del Admin: reemplaza el listado plano de modelos de
+    Jazzmin por lo que hay que revisar cada día (ver core/dashboard.py)."""
+    contexto = {
+        **admin.site.each_context(request),
+        "title": "Inicio",
+        **contexto_dashboard(),
+    }
+    return render(request, "admin/index.html", contexto)
+
+
+def facturar_uno_ahora_view(request, contrato_id):
+    if request.method != "POST":
+        raise PermissionDenied
+    if not request.user.has_perm("core.change_contrato"):
+        raise PermissionDenied
+    contrato = get_object_or_404(Contrato, pk=contrato_id, estado=Contrato.Estado.ACTIVO)
+    _facturar_contratos(request, [contrato])
+    return redirect("admin:index")
 
 
 @admin.action(description="Facturación: descargar plantilla de lecturas")
@@ -283,9 +311,46 @@ class EquipoAdmin(admin.ModelAdmin):
         "metodo_lectura",
         "estado_actual",
         "permite_reset_contador",
+        "contrato_activo",
+        "cliente_activo",
     )
-    list_filter = ("metodo_lectura", "estado_actual", "marca")
-    search_fields = ("numero_serie", "marca", "modelo", "id_externo_3manager", "id_externo_printaudit")
+    list_filter = (
+        "metodo_lectura",
+        "estado_actual",
+        "marca",
+        ("asignaciones__contrato", admin.RelatedOnlyFieldListFilter),
+        ("asignaciones__contrato__cliente", admin.RelatedOnlyFieldListFilter),
+    )
+    search_fields = (
+        "numero_serie",
+        "marca",
+        "modelo",
+        "id_externo_3manager",
+        "id_externo_printaudit",
+        "asignaciones__contrato__numero_contrato",
+        "asignaciones__contrato__cliente__nombre",
+    )
+
+    def get_queryset(self, request):
+        # Los filtros/búsqueda por asignaciones__* hacen un JOIN; sin distinct()
+        # un equipo con más de una asignación histórica aparecería repetido.
+        # prefetch_related evita una consulta por fila en contrato_activo/cliente_activo.
+        return (
+            super()
+            .get_queryset(request)
+            .distinct()
+            .prefetch_related("asignaciones__contrato__cliente")
+        )
+
+    @admin.display(description="Contrato actual")
+    def contrato_activo(self, obj):
+        asignacion = next((a for a in obj.asignaciones.all() if a.fecha_fin is None), None)
+        return asignacion.contrato.numero_contrato if asignacion else "—"
+
+    @admin.display(description="Cliente actual")
+    def cliente_activo(self, obj):
+        asignacion = next((a for a in obj.asignaciones.all() if a.fecha_fin is None), None)
+        return asignacion.contrato.cliente.nombre if asignacion else "—"
 
     def get_urls(self):
         urls = [
