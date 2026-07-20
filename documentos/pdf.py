@@ -14,8 +14,12 @@ MESES_ES = [
 ]
 
 
-def _moneda(valor: Decimal) -> str:
-    return f"${valor:,.2f}"
+SIMBOLO_MONEDA = {"MXN": "$", "USD": "US$"}
+
+
+def _moneda(valor: Decimal, moneda: str = "MXN") -> str:
+    simbolo = SIMBOLO_MONEDA.get(moneda, f"{moneda} ")
+    return f"{simbolo}{valor:,.2f}"
 
 
 def generar_pdf_factura(resultado: ResultadoFacturacion, contrato: Contrato) -> bytes:
@@ -57,14 +61,15 @@ def generar_pdf_factura(resultado: ResultadoFacturacion, contrato: Contrato) -> 
         "fecha_fin": resultado.fecha_fin.strftime("%d/%m/%Y"),
         "fecha_generacion": timezone.localtime().strftime("%d/%m/%Y %H:%M"),
         "equipos": equipos,
+        "moneda": resultado.moneda,
         "consumo_excedente_bn": resultado.consumo_excedente_bn,
         "consumo_excedente_color": resultado.consumo_excedente_color,
-        "monto_excedente_bn": _moneda(monto_excedente_bn),
-        "monto_excedente_color": _moneda(monto_excedente_color),
-        "monto_renta": _moneda(resultado.monto_renta),
-        "monto_excedente": _moneda(resultado.monto_excedente),
-        "monto_iva": _moneda(resultado.monto_iva),
-        "monto_total": _moneda(resultado.monto_total),
+        "monto_excedente_bn": _moneda(monto_excedente_bn, resultado.moneda),
+        "monto_excedente_color": _moneda(monto_excedente_color, resultado.moneda),
+        "monto_renta": _moneda(resultado.monto_renta, resultado.moneda),
+        "monto_excedente": _moneda(resultado.monto_excedente, resultado.moneda),
+        "monto_iva": _moneda(resultado.monto_iva, resultado.moneda),
+        "monto_total": _moneda(resultado.monto_total, resultado.moneda),
         "iva_porcentaje": contrato.iva_porcentaje,
     }
 

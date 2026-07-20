@@ -19,6 +19,11 @@ class MetodoLectura(models.TextChoices):
     MANUAL = "manual", "Manual"
 
 
+class Moneda(models.TextChoices):
+    MXN = "MXN", "Peso mexicano (MXN)"
+    USD = "USD", "Dólar estadounidense (USD)"
+
+
 class Cliente(TimestampedModel):
     nombre = models.CharField(max_length=255)
     razon_social = models.CharField(max_length=255, blank=True)
@@ -53,6 +58,7 @@ class Contrato(TimestampedModel):
 
     numero_contrato = models.CharField(max_length=50, unique=True)
     cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name="contratos")
+    moneda = models.CharField(max_length=3, choices=Moneda.choices, default=Moneda.MXN)
     renta_base = models.DecimalField(max_digits=10, decimal_places=2)
     copias_incluidas_bn = models.PositiveIntegerField(default=0)
     copias_incluidas_color = models.PositiveIntegerField(default=0)
@@ -203,6 +209,12 @@ class Factura(TimestampedModel):
         help_text="Inicio real del rango de lecturas facturado. Ancla el siguiente periodo (ver core.procesamiento_facturacion).",
     )
     fecha_fin = models.DateField(null=True, blank=True, help_text="Fin real del rango de lecturas facturado.")
+    moneda = models.CharField(
+        max_length=3,
+        choices=Moneda.choices,
+        default=Moneda.MXN,
+        help_text="Copiada del contrato al momento de calcular la factura, para que quede fija aunque el contrato cambie de moneda después.",
+    )
     consumo_excedente_bn = models.PositiveIntegerField(default=0)
     consumo_excedente_color = models.PositiveIntegerField(default=0)
     monto_renta = models.DecimalField(max_digits=10, decimal_places=2)

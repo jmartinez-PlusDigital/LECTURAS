@@ -35,11 +35,19 @@
             <div class="pd-kpi-value">{{ alertas_pendientes|length }}</div>
             {% if alertas_pendientes %}<div class="pd-kpi-delta pd-warn">{% trans 'requieren revisión antes de facturar' %}</div>{% endif %}
         </div>
+        {% for fila in facturado_mes_por_moneda %}
+        <div class="pd-kpi">
+            <div class="pd-kpi-label">{% trans 'Facturado este mes' %} ({{ fila.moneda }})</div>
+            <div class="pd-kpi-value">{{ fila.moneda }} ${{ fila.total|floatformat:2 }}</div>
+            <div class="pd-kpi-delta">{{ fila.cantidad }} {% trans 'facturas emitidas' %}</div>
+        </div>
+        {% empty %}
         <div class="pd-kpi">
             <div class="pd-kpi-label">{% trans 'Facturado este mes' %}</div>
-            <div class="pd-kpi-value">${{ facturado_mes|floatformat:2 }}</div>
-            <div class="pd-kpi-delta">{{ facturas_mes_count }} {% trans 'facturas emitidas' %}</div>
+            <div class="pd-kpi-value">—</div>
+            <div class="pd-kpi-delta">{% trans 'sin facturas todavía' %}</div>
         </div>
+        {% endfor %}
     </div>
 
     <div class="pd-panels">
@@ -54,6 +62,7 @@
                         <tr>
                             <th>{% trans 'Contrato' %}</th>
                             <th>{% trans 'Cliente' %}</th>
+                            <th>{% trans 'Moneda' %}</th>
                             <th>{% trans 'Última factura' %}</th>
                             <th class="num">{% trans 'Equipos' %}</th>
                             <th></th>
@@ -64,10 +73,11 @@
                         <tr>
                             <td class="mono">{{ contrato.numero_contrato }}</td>
                             <td>{{ contrato.cliente.nombre }}</td>
+                            <td>{{ contrato.moneda }}</td>
                             <td>
                                 {% if contrato.ultima_factura %}
                                     {{ contrato.ultima_factura.fecha_fin|date:"d/m/Y" }}
-                                    <span class="pd-sub-cell">${{ contrato.ultima_factura.monto_total|floatformat:2 }}</span>
+                                    <span class="pd-sub-cell">{{ contrato.ultima_factura.moneda }} ${{ contrato.ultima_factura.monto_total|floatformat:2 }}</span>
                                 {% else %}
                                     {% trans 'Sin facturas previas' %}<span class="pd-sub-cell">{% trans 'primer corte' %}</span>
                                 {% endif %}
@@ -83,7 +93,7 @@
                             </td>
                         </tr>
                         {% empty %}
-                        <tr><td colspan="5">{% trans 'No hay contratos con corte hoy.' %}</td></tr>
+                        <tr><td colspan="6">{% trans 'No hay contratos con corte hoy.' %}</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -133,7 +143,7 @@
                         <tr>
                             <td>{{ factura.contrato.numero_contrato }} <span class="pd-sub-cell">{{ factura.contrato.cliente.nombre }}</span></td>
                             <td>{{ factura.periodo_mes|stringformat:"02d" }}/{{ factura.periodo_anio }}</td>
-                            <td class="num">${{ factura.monto_total|floatformat:2 }}</td>
+                            <td class="num">{{ factura.moneda }} ${{ factura.monto_total|floatformat:2 }}</td>
                             <td>
                                 {% if factura.estado == 'ok' %}<span class="pd-chip pd-chip-ok">Ok</span>
                                 {% elif factura.estado == 'pendiente' %}<span class="pd-chip pd-chip-pending">Pendiente</span>
@@ -145,6 +155,51 @@
                         {% endfor %}
                     </tbody>
                 </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="pd-panels">
+        <div class="pd-panel pd-panel-full">
+            <div class="pd-panel-head">
+                <h2>{% trans 'Facturación mensual' %}</h2>
+                <span class="pd-hint">{% trans 'últimos 12 meses, por moneda' %}</span>
+            </div>
+            <div class="pd-chart-grid">
+                {% for serie in tendencia_facturacion %}
+                <div class="pd-chart">
+                    <div class="pd-chart-title">{{ serie.moneda }}</div>
+                    {% for punto in serie.puntos %}
+                    <div class="pd-chart-row">
+                        <span class="pd-chart-label">{{ punto.etiqueta }}</span>
+                        <span class="pd-chart-track"><span class="pd-chart-bar pd-chart-bar-1" style="width: {{ punto.pct }}%"></span></span>
+                        <span class="pd-chart-value">${{ punto.valor|floatformat:2 }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% empty %}
+                <p class="pd-hint">{% trans 'Todavía no hay facturas para graficar.' %}</p>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="pd-panel pd-panel-full">
+            <div class="pd-panel-head">
+                <h2>{% trans 'Excedente de copias facturado' %}</h2>
+                <span class="pd-hint">{% trans 'BN y Color, últimos 12 meses' %}</span>
+            </div>
+            <div class="pd-chart">
+                {% for punto in tendencia_excedente %}
+                <div class="pd-chart-row pd-chart-row-doble">
+                    <span class="pd-chart-label">{{ punto.etiqueta }}</span>
+                    <span class="pd-chart-track"><span class="pd-chart-bar pd-chart-bar-1" style="width: {{ punto.pct_bn }}%"></span></span>
+                    <span class="pd-chart-value">{{ punto.bn }} BN</span>
+                    <span class="pd-chart-track"><span class="pd-chart-bar pd-chart-bar-2" style="width: {{ punto.pct_color }}%"></span></span>
+                    <span class="pd-chart-value">{{ punto.color }} Color</span>
+                </div>
+                {% empty %}
+                <p class="pd-hint">{% trans 'Todavía no hay facturas para graficar.' %}</p>
+                {% endfor %}
             </div>
         </div>
     </div>

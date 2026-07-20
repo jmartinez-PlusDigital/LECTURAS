@@ -21,6 +21,7 @@
     --pd-critical-fg: #a63333;
     --pd-pending-bg: #eef1fa;
     --pd-pending-fg: #3c4f8a;
+    --pd-chart-2: #b8763a;
     --pd-font-display: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
     --pd-font-mono: "SF Mono", "Cascadia Mono", Consolas, "Roboto Mono", monospace;
 }
@@ -43,6 +44,7 @@ html[data-bs-theme="dark"] {
     --pd-critical-fg: #e08080;
     --pd-pending-bg: #1c2440;
     --pd-pending-fg: #a9b7ee;
+    --pd-chart-2: #d99a5c;
 }
 
 /* --- Rebrand sitewide: sidebar, marca, botones primarios --- */
@@ -172,10 +174,33 @@ a { color: var(--pd-navy-700); }
 .pd-quick-title { font-weight: 700; font-size: 13.5px; }
 .pd-quick-desc { font-size: 12px; color: var(--pd-ink-soft); }
 
+/* --- Gráficas de tendencia (barras via CSS, sin JS/CDN) --- */
+.pd-chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; padding: 16px; }
+.pd-chart { padding: 16px; }
+.pd-chart-title { font-weight: 700; font-size: 12.5px; margin-bottom: 8px; color: var(--pd-ink); }
+.pd-chart-row {
+    display: grid;
+    grid-template-columns: 62px 1fr 84px;
+    align-items: center;
+    gap: 8px;
+    padding: 2.5px 0;
+}
+.pd-chart-row-doble { grid-template-columns: 62px 1fr 60px 1fr 60px; }
+.pd-chart-label { font-size: 11.5px; color: var(--pd-ink-soft); white-space: nowrap; }
+.pd-chart-track { background: var(--pd-line); border-radius: 4px; height: 9px; overflow: hidden; }
+.pd-chart-bar { display: block; height: 100%; border-radius: 4px; min-width: 2px; }
+.pd-chart-bar-1 { background: var(--pd-navy-700); }
+.pd-chart-bar-2 { background: var(--pd-chart-2); }
+.pd-chart-value {
+    text-align: right; font-family: var(--pd-font-mono); font-size: 11.5px;
+    color: var(--pd-ink); white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+
 @media (max-width: 1080px) {
     .pd-panels { grid-template-columns: 1fr; }
     .pd-kpis { grid-template-columns: 1fr 1fr; }
     .pd-quick-grid { grid-template-columns: 1fr 1fr; }
+    .pd-chart-row-doble { grid-template-columns: 52px 1fr 46px; grid-template-rows: auto auto; }
 }
 @media (max-width: 620px) {
     .pd-kpis, .pd-quick-grid { grid-template-columns: 1fr; }

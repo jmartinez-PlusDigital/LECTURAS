@@ -146,3 +146,39 @@ class FacturacionTestCase(TestCase):
             self.assertTrue(factura.pdf_archivo.name.endswith(".pdf"))
             self.assertEqual(factura.pdf_archivo.read(), b"contenido-pdf-falso")
             self.assertEqual(factura.monto_total, resultado.monto_total)
+
+    def test_moneda_por_defecto_es_mxn(self):
+        equipo = self._equipo("SN-FAC-7")
+        asignacion = self._asignacion(equipo)
+        Lectura.objects.create(
+            asignacion=asignacion, fecha=date(2026, 1, 31), lectura_bn=500, lectura_color=50, origen="manual"
+        )
+
+        resultado = calcular_factura(self.contrato, date(2026, 1, 1), date(2026, 1, 31), 1, 2026)
+
+        self.assertEqual(resultado.moneda, "MXN")
+
+    def test_moneda_del_contrato_se_propaga_a_la_factura_persistida(self):
+        contrato_usd = Contrato.objects.create(
+            numero_contrato="CT-FAC-USD",
+            cliente=self.cliente,
+            moneda="USD",
+            renta_base=Decimal("500.00"),
+            copias_incluidas_bn=1000,
+            copias_incluidas_color=200,
+            costo_excedente_bn=Decimal("0.50"),
+            costo_excedente_color=Decimal("1.50"),
+            dia_corte_facturacion=1,
+            fecha_inicio=date(2026, 1, 1),
+        )
+        equipo = self._equipo("SN-FAC-8")
+        asignacion = self._asignacion(equipo, contrato=contrato_usd)
+        Lectura.objects.create(
+            asignacion=asignacion, fecha=date(2026, 1, 31), lectura_bn=500, lectura_color=50, origen="manual"
+        )
+
+        resultado = calcular_factura(contrato_usd, date(2026, 1, 1), date(2026, 1, 31), 1, 2026)
+        self.assertEqual(resultado.moneda, "USD")
+
+        factura = persistir_factura(resultado)
+        self.assertEqual(factura.moneda, "USD")

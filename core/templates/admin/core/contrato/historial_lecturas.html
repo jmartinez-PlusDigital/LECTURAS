@@ -17,7 +17,10 @@
     .historial-lecturas table.resultados td.num { text-align: right; }
     .historial-lecturas tr.fila-alerta td { background: #fff8e1; }
     .historial-lecturas tr.fila-error td { background: #fff2f2; }
-    .historial-lecturas .acciones { margin: 12px 0; }
+    .historial-lecturas .acciones { margin: 12px 0; display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+    .historial-lecturas .filtro-fechas { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+    .historial-lecturas .filtro-fechas .form-row { margin: 0; }
+    .historial-lecturas .filtro-fechas label { display: block; font-size: 11.5px; margin-bottom: 2px; }
 </style>
 
 <div id="content-main" class="historial-lecturas">
@@ -25,7 +28,21 @@
     <p>Solo se muestran las lecturas que cayeron dentro del periodo de una factura ya emitida.</p>
 
     <div class="acciones">
-        <a href="{% url 'admin:core_contrato_historial_lecturas_excel' contrato.pk %}" class="button">Descargar Excel</a>
+        <form method="get" class="filtro-fechas">
+            <div class="form-row">
+                <label for="id_desde">Desde</label>
+                <input type="date" id="id_desde" name="desde" value="{{ fecha_desde|date:'Y-m-d' }}">
+            </div>
+            <div class="form-row">
+                <label for="id_hasta">Hasta</label>
+                <input type="date" id="id_hasta" name="hasta" value="{{ fecha_hasta|date:'Y-m-d' }}">
+            </div>
+            <input type="submit" value="Filtrar" class="button">
+            {% if fecha_desde or fecha_hasta %}
+                <a href="{% url 'admin:core_contrato_historial_lecturas' contrato.pk %}">Quitar filtro</a>
+            {% endif %}
+        </form>
+        <a href="{% url 'admin:core_contrato_historial_lecturas_excel' contrato.pk %}?desde={{ fecha_desde|date:'Y-m-d' }}&hasta={{ fecha_hasta|date:'Y-m-d' }}" class="button">Descargar Excel</a>
     </div>
 
     <table class="resultados">

@@ -9,6 +9,7 @@ from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.utils.html import format_html, format_html_join
 
 from core.dashboard import contexto_dashboard
@@ -103,10 +104,26 @@ class ClienteAdmin(admin.ModelAdmin):
         "contacto_telefono",
         "id_cuenta_3manager",
         "activo",
+        "enlace_equipos",
     )
     list_filter = ("activo",)
     search_fields = ("nombre", "razon_social", "rfc", "contacto_email")
     actions = [buscar_cuenta_3manager, importar_equipos_3manager]
+
+    @admin.display(description="Equipos")
+    def enlace_equipos(self, obj):
+        url = reverse("admin:core_equipo_changelist")
+        return format_html(
+            '<a href="{}?asignaciones__contrato__cliente__id__exact={}">Ver equipos</a>', url, obj.pk
+        )
+
+
+def _leer_rango_fechas(request):
+    """Lee ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD del querystring (ambos opcionales).
+    Una fecha con formato inválido se ignora en vez de tronar la página."""
+    fecha_desde = parse_date(request.GET.get("desde", "") or "")
+    fecha_hasta = parse_date(request.GET.get("hasta", "") or "")
+    return fecha_desde, fecha_hasta
 
 
 def _facturar_contratos(request, contratos: list[Contrato]) -> None:
@@ -202,13 +219,15 @@ class ContratoAdmin(admin.ModelAdmin):
         "numero_contrato",
         "cliente",
         "estado",
+        "moneda",
         "renta_base",
         "dia_corte_facturacion",
         "fecha_inicio",
         "fecha_fin",
         "enlace_historial",
+        "enlace_equipos",
     )
-    list_filter = ("estado",)
+    list_filter = ("estado", "moneda")
     search_fields = ("numero_contrato", "cliente__nombre")
     autocomplete_fields = ("cliente",)
     date_hierarchy = "fecha_inicio"
@@ -218,6 +237,11 @@ class ContratoAdmin(admin.ModelAdmin):
     def enlace_historial(self, obj):
         url = reverse("admin:core_contrato_historial_lecturas", args=[obj.pk])
         return format_html('<a href="{}">Ver historial de lecturas</a>', url)
+
+    @admin.display(description="Equipos")
+    def enlace_equipos(self, obj):
+        url = reverse("admin:core_equipo_changelist")
+        return format_html('<a href="{}?asignaciones__contrato__id__exact={}">Ver equipos</a>', url, obj.pk)
 
     def get_urls(self):
         urls = [
@@ -236,20 +260,24 @@ class ContratoAdmin(admin.ModelAdmin):
 
     def historial_lecturas_view(self, request, contrato_id):
         contrato = get_object_or_404(Contrato, pk=contrato_id)
-        filas = historial_de_contrato(contrato)
+        fecha_desde, fecha_hasta = _leer_rango_fechas(request)
+        filas = historial_de_contrato(contrato, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta)
         contexto = {
             **self.admin_site.each_context(request),
             "opts": self.model._meta,
             "title": f"Historial de lecturas — {contrato.numero_contrato}",
             "contrato": contrato,
             "filas": filas,
+            "fecha_desde": fecha_desde,
+            "fecha_hasta": fecha_hasta,
         }
         return render(request, "admin/core/contrato/historial_lecturas.html", contexto)
 
     def historial_lecturas_excel_view(self, request, contrato_id):
         contrato = get_object_or_404(Contrato, pk=contrato_id)
-        filas = historial_de_contrato(contrato)
-        contenido = generar_excel_historial(contrato, filas)
+        fecha_desde, fecha_hasta = _leer_rango_fechas(request)
+        filas = historial_de_contrato(contrato, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta)
+        contenido = generar_excel_historial(contrato, filas, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta)
         response = HttpResponse(
             contenido, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
@@ -563,12 +591,13 @@ class FacturaAdmin(admin.ModelAdmin):
         "fecha_inicio",
         "fecha_fin",
         "monto_total",
+        "moneda",
         "estado",
         "fecha_generacion",
         "enlace_pdf",
         "enlace_excel",
     )
-    list_filter = ("estado", "periodo_anio", "periodo_mes")
+    list_filter = ("estado", "moneda", "periodo_anio", "periodo_mes")
     search_fields = ("contrato__numero_contrato",)
     autocomplete_fields = ("contrato",)
 

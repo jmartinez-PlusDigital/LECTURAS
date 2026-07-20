@@ -11,6 +11,7 @@ from .pdf import MESES_ES
 
 AZUL_OSCURO = "1F3D5C"
 GRIS_CLARO = "F5F7F9"
+FORMATO_MONEDA = {"MXN": '"$"#,##0.00', "USD": '"US$"#,##0.00'}
 
 
 def generar_excel_factura(resultado: ResultadoFacturacion, contrato: Contrato) -> bytes:
@@ -35,8 +36,12 @@ def generar_excel_factura(resultado: ResultadoFacturacion, contrato: Contrato) -
     ws["A4"] = "Periodo"
     ws["A4"].font = fuente_etiqueta
     ws["B4"] = f"{resultado.fecha_inicio.strftime('%d/%m/%Y')} - {resultado.fecha_fin.strftime('%d/%m/%Y')}"
+    ws["A5"] = "Moneda"
+    ws["A5"].font = fuente_etiqueta
+    ws["B5"] = resultado.moneda
 
-    fila_encabezado_tabla = 6
+    formato_moneda = FORMATO_MONEDA.get(resultado.moneda, '#,##0.00 "' + resultado.moneda + '"')
+    fila_encabezado_tabla = 7
     encabezados = [
         "Número de serie",
         "Marca / Modelo",
@@ -95,7 +100,7 @@ def generar_excel_factura(resultado: ResultadoFacturacion, contrato: Contrato) -
         ws.cell(row=fila, column=1, value=etiqueta).font = fuente_etiqueta
         celda_valor = ws.cell(row=fila, column=2, value=valor)
         if isinstance(valor, float):
-            celda_valor.number_format = '"$"#,##0.00'
+            celda_valor.number_format = formato_moneda
         if etiqueta == "Total":
             ws.cell(row=fila, column=1).font = Font(bold=True, size=12, color=AZUL_OSCURO)
             celda_valor.font = Font(bold=True, size=12, color=AZUL_OSCURO)

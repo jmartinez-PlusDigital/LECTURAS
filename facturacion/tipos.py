@@ -24,6 +24,7 @@ class ResultadoFacturacion:
     periodo_anio: int
     fecha_inicio: date
     fecha_fin: date
+    moneda: str
     consumo_por_equipo: list[ConsumoEquipo]
     consumo_excedente_bn: int
     consumo_excedente_color: int
@@ -40,6 +41,7 @@ class ResultadoFacturacion:
             "periodo_anio": self.periodo_anio,
             "fecha_inicio": str(self.fecha_inicio),
             "fecha_fin": str(self.fecha_fin),
+            "moneda": self.moneda,
             "consumo_por_equipo": [
                 {
                     "asignacion_id": c.asignacion_id,

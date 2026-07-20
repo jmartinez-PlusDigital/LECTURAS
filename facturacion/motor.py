@@ -115,6 +115,7 @@ def _calcular(
         periodo_anio=periodo_anio,
         fecha_inicio=fecha_inicio,
         fecha_fin=fecha_fin,
+        moneda=contrato.moneda,
         consumo_por_equipo=consumo_por_equipo,
         consumo_excedente_bn=excedente_bn,
         consumo_excedente_color=excedente_color,
@@ -149,6 +150,7 @@ def persistir_factura(
         defaults={
             "fecha_inicio": resultado.fecha_inicio,
             "fecha_fin": resultado.fecha_fin,
+            "moneda": resultado.moneda,
             "consumo_excedente_bn": resultado.consumo_excedente_bn,
             "consumo_excedente_color": resultado.consumo_excedente_color,
             "monto_renta": resultado.monto_renta,

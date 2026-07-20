@@ -36,10 +36,17 @@ class FilaHistorial:
     factura_periodo: str
 
 
-def historial_de_contrato(contrato: Contrato) -> list[FilaHistorial]:
+def historial_de_contrato(
+    contrato: Contrato, *, fecha_desde: date | None = None, fecha_hasta: date | None = None
+) -> list[FilaHistorial]:
     """Lecturas de todas las Asignaciones que alguna vez tuvo este contrato
     (no solo las activas) que caen dentro del rango fecha_inicio/fecha_fin de
-    alguna Factura ya emitida, ordenadas por equipo y fecha."""
+    alguna Factura ya emitida, ordenadas por equipo y fecha.
+
+    `fecha_desde`/`fecha_hasta` acotan por la fecha de la propia Lectura (no
+    por el periodo de la factura), para poder revisar p. ej. solo marzo-mayo
+    de 2026 sin importar en qué factura(s) haya caído cada lectura.
+    """
     facturas = list(
         Factura.objects.filter(
             contrato=contrato, fecha_inicio__isnull=False, fecha_fin__isnull=False
@@ -53,6 +60,10 @@ def historial_de_contrato(contrato: Contrato) -> list[FilaHistorial]:
     filas = []
     for asignacion in asignaciones:
         lecturas = Lectura.objects.filter(asignacion=asignacion).order_by("fecha")
+        if fecha_desde is not None:
+            lecturas = lecturas.filter(fecha__gte=fecha_desde)
+        if fecha_hasta is not None:
+            lecturas = lecturas.filter(fecha__lte=fecha_hasta)
         for lectura in lecturas:
             factura = _factura_que_incluye(facturas, lectura.fecha)
             if factura is None:
@@ -86,12 +97,22 @@ def _factura_que_incluye(facturas: list[Factura], fecha: date) -> Factura | None
     return None
 
 
-def generar_excel_historial(contrato: Contrato, filas: list[FilaHistorial]) -> bytes:
+def generar_excel_historial(
+    contrato: Contrato,
+    filas: list[FilaHistorial],
+    *,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
+) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Historial"
 
-    ws["A1"] = f"Historial de lecturas facturadas — Contrato {contrato.numero_contrato}"
+    titulo = f"Historial de lecturas facturadas — Contrato {contrato.numero_contrato}"
+    if fecha_desde or fecha_hasta:
+        rango = f"{fecha_desde.strftime('%d/%m/%Y') if fecha_desde else 'inicio'} — {fecha_hasta.strftime('%d/%m/%Y') if fecha_hasta else 'hoy'}"
+        titulo += f" ({rango})"
+    ws["A1"] = titulo
     ws["A1"].font = Font(size=14, bold=True, color=AZUL_OSCURO)
     ws.merge_cells("A1:J1")
 
