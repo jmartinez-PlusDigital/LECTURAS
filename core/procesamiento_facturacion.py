@@ -76,14 +76,29 @@ def procesar_contrato(contrato: Contrato, hoy: date) -> dict:
             resultado_calculo, pdf_bytes=pdf_bytes, excel_bytes=excel_bytes, estado=Factura.Estado.OK
         )
 
+        detalle = {"fase": "completo", "factura_id": factura.id, "monto_total": str(factura.monto_total)}
+        if resultado_auditoria.alertas:
+            # Solo llegan aquí alertas no bloqueantes (candado f): el contrato ya
+            # pasó `resultado_auditoria.aprobado` arriba. Antes se descartaban en
+            # silencio; ahora quedan en el log para revisión humana (ver
+            # core.dashboard._advertencias_consumo_recientes).
+            detalle["advertencias"] = _advertencias_de(resultado_auditoria)
+
         LogEjecucion.objects.create(
             contrato=contrato,
             estado=LogEjecucion.Estado.OK,
-            detalle={"fase": "completo", "factura_id": factura.id, "monto_total": str(factura.monto_total)},
+            detalle=detalle,
             enlaces_generados={"pdf": factura.pdf_archivo.url, "excel": factura.excel_archivo.url},
         )
 
     return {"contrato": contrato.numero_contrato, "estado": "ok", "detalle": f"factura {factura.id}"}
+
+
+def _advertencias_de(resultado_auditoria) -> list[dict]:
+    return [
+        {"candado": a.candado, "equipo": a.equipo_numero_serie, "mensaje": a.mensaje, "datos": a.datos}
+        for a in resultado_auditoria.alertas
+    ]
 
 
 def _registrar_error(contrato: Contrato, fase: str, exc: Exception) -> dict:

@@ -1,12 +1,19 @@
-"""Cálculo de consumo por lectura, compartido entre `auditoria/` y `facturacion/`.
+"""Cálculo de consumo por lectura, compartido entre `auditoria/`, `facturacion/`
+y `core.models.Lectura.save()`.
 
-Mantener esta lógica en un solo lugar evita que ambos motores diverjan en cómo
-interpretan rollover de contador o el primer mes de una asignación nueva.
+Mantener esta lógica en un solo lugar evita que los distintos puntos que la
+usan diverjan en cómo interpretan rollover de contador, el primer mes de una
+asignación nueva, o qué cuenta como "consumo anómalo" para un equipo.
 """
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
+from decimal import Decimal
 
-from core.models import Asignacion, Lectura
+from core.models import Asignacion, Equipo, Lectura
+
+DIAS_MES_APROX = 30
+MESES_HISTORIAL_DEFAULT = 6
+FACTOR_ANOMALIA_DEFAULT = Decimal("3.5")
 
 
 @dataclass
@@ -80,3 +87,97 @@ def calcular_consumo(asignacion: Asignacion, lectura: Lectura) -> ResultadoConsu
         anterior_color=anterior_color,
         fecha_anterior=fecha_anterior,
     )
+
+
+def promedio_historico_mensual(equipo: Equipo, categoria: str, antes_de: date, meses: int) -> float | None:
+    """Promedio de consumo mensual del equipo en los `meses` anteriores a `antes_de`.
+
+    Agrupa por mes calendario (la suma de deltas diarios dentro de un mes es
+    igual al consumo total del mes, sin importar la granularidad real de las
+    lecturas) y promedia esos totales mensuales. Devuelve None si no hay
+    suficiente historial para establecer una base confiable.
+    """
+    desde = antes_de - timedelta(days=meses * DIAS_MES_APROX)
+    lecturas = list(
+        Lectura.objects.filter(asignacion__equipo=equipo, fecha__gte=desde, fecha__lt=antes_de)
+        .select_related("asignacion")
+        .order_by("fecha")
+    )
+    if len(lecturas) < 2:
+        return None
+
+    consumo_por_mes: dict[tuple[int, int], int] = {}
+    for lectura in lecturas:
+        resultado_consumo = calcular_consumo(lectura.asignacion, lectura)
+        if resultado_consumo.lectura_invertida_bn or resultado_consumo.lectura_invertida_color:
+            continue
+        if resultado_consumo.es_primera_lectura_asignacion:
+            # El salto contra la lectura de referencia inicial no representa
+            # consumo real del periodo anterior; se excluye del promedio.
+            continue
+        consumo = resultado_consumo.consumo_bn if categoria == "bn" else resultado_consumo.consumo_color
+        clave_mes = (lectura.fecha.year, lectura.fecha.month)
+        consumo_por_mes[clave_mes] = consumo_por_mes.get(clave_mes, 0) + consumo
+
+    if not consumo_por_mes:
+        return None
+    valores = list(consumo_por_mes.values())
+    return sum(valores) / len(valores)
+
+
+@dataclass
+class AnomaliaConsumo:
+    categoria: str  # "bn" o "color"
+    consumo: int
+    promedio_historico: float
+    factor: Decimal
+
+    @property
+    def mensaje(self) -> str:
+        return (
+            f"Consumo {self.categoria.upper()} ({self.consumo}) supera "
+            f"{self.factor}x el promedio histórico ({self.promedio_historico:.1f})."
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "categoria": self.categoria,
+            "consumo": self.consumo,
+            "promedio_historico": self.promedio_historico,
+            "factor": str(self.factor),
+            "mensaje": self.mensaje,
+        }
+
+
+def detectar_anomalias(
+    asignacion: Asignacion,
+    lectura: Lectura,
+    *,
+    factor_anomalia: Decimal = FACTOR_ANOMALIA_DEFAULT,
+    meses_historial: int = MESES_HISTORIAL_DEFAULT,
+) -> list[AnomaliaConsumo]:
+    """Compara el consumo implícito de una lectura puntual contra el promedio
+    histórico mensual del equipo — para avisar en el momento de captura, no
+    solo hasta la auditoría de fin de mes (ver `auditoria.motor`, candado f,
+    que aplica el mismo criterio sobre el consumo de todo un periodo).
+
+    Asume una cadencia de lectura aproximadamente mensual: con lecturas más
+    frecuentes el aviso puede no dispararse; con huecos largos puede
+    dispararse de más. Como es no bloqueante (solo marca `estado_auditoria`),
+    ese margen de error es aceptable.
+    """
+    consumo = calcular_consumo(asignacion, lectura)
+    if consumo.es_primera_lectura_asignacion or consumo.lectura_invertida_bn or consumo.lectura_invertida_color:
+        return []
+
+    equipo = asignacion.equipo
+    anomalias = []
+    for categoria, valor in (("bn", consumo.consumo_bn), ("color", consumo.consumo_color)):
+        promedio = promedio_historico_mensual(equipo, categoria, lectura.fecha, meses_historial)
+        if promedio and valor > float(factor_anomalia) * promedio:
+            anomalias.append(
+                AnomaliaConsumo(
+                    categoria=categoria, consumo=valor, promedio_historico=promedio, factor=factor_anomalia
+                )
+            )
+    return anomalias

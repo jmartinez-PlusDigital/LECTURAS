@@ -38,7 +38,7 @@
         </p>
     </div>
 
-    <form method="post" enctype="multipart/form-data">
+    <form method="post" enctype="multipart/form-data" class="pd-form-loading">
         {% csrf_token %}
         <div class="form-row">
             {{ form.archivo.label_tag }} {{ form.archivo }}
@@ -48,7 +48,7 @@
             <label for="{{ form.dry_run.id_for_label }}">{{ form.dry_run }} {{ form.dry_run.label }}</label>
         </div>
         <div class="submit-row">
-            <input type="submit" value="Procesar archivo" class="default">
+            <input type="submit" value="Procesar archivo" class="default" data-pd-texto-carga="Procesando archivo…">
         </div>
     </form>
 

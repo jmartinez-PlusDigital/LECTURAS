@@ -1,0 +1,90 @@
+{% extends "admin/base_site.html" %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Inicio</a>
+    &rsaquo; <a href="{% url 'admin:core_contrato_changelist' %}">Contratos</a>
+    &rsaquo; Importar contratos
+</div>
+{% endblock %}
+
+{% block content %}
+<style>
+    .importar-contratos .ayuda { max-width: 780px; margin-bottom: 16px; }
+    .importar-contratos table.resultados { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    .importar-contratos table.resultados th,
+    .importar-contratos table.resultados td { border: 1px solid #ccc; padding: 4px 8px; font-size: 12.5px; text-align: left; }
+    .importar-contratos table.resultados th { background: #f4f4f4; }
+    .importar-contratos tr.fila-error td { background: #fff2f2; }
+    .importar-contratos .resumen-cifras { margin: 10px 0; }
+    .importar-contratos .resumen-cifras span { margin-right: 18px; }
+</style>
+
+<div id="content-main" class="importar-contratos">
+    <div class="ayuda">
+        <p>
+            Sube un archivo <strong>.csv</strong> o <strong>.xlsx</strong> con contratos para crear/actualizar
+            en batch — segundo paso de la carga masiva (Cliente &rarr; Contrato &rarr; Equipo &rarr; Lectura).
+            El cliente de cada fila debe existir ya (<a href="{% url 'admin:core_cliente_importar' %}">importar
+            clientes</a> primero si hace falta).
+            <a href="{% url 'admin:core_contrato_importar_plantilla' %}">Descargar plantilla de ejemplo</a>.
+        </p>
+        <p>
+            Columnas: <code>numero_contrato</code> (requerido, único), <code>cliente</code> (requerido, nombre
+            exacto de un cliente ya existente), <code>moneda</code> (MXN/USD, default MXN),
+            <code>renta_base</code> (requerido), <code>copias_incluidas_bn</code>,
+            <code>copias_incluidas_color</code>, <code>costo_excedente_bn</code> (requerido),
+            <code>costo_excedente_color</code> (requerido), <code>iva_porcentaje</code> (default 16.00),
+            <code>dia_corte_facturacion</code> (requerido, 1-31), <code>estado</code>
+            (activo/suspendido/terminado, default activo), <code>fecha_inicio</code> (requerido, YYYY-MM-DD),
+            <code>fecha_fin</code> (opcional). Si ya existe un contrato con ese número, se actualiza en vez de
+            duplicarse.
+        </p>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" class="pd-form-loading">
+        {% csrf_token %}
+        <div class="form-row">
+            {{ form.archivo.label_tag }} {{ form.archivo }}
+            {% if form.archivo.errors %}<p class="errornote">{{ form.archivo.errors|join:", " }}</p>{% endif %}
+        </div>
+        <div class="form-row">
+            <label for="{{ form.dry_run.id_for_label }}">{{ form.dry_run }} {{ form.dry_run.label }}</label>
+        </div>
+        <div class="submit-row">
+            <input type="submit" value="Procesar archivo" class="default" data-pd-texto-carga="Procesando archivo…">
+        </div>
+    </form>
+
+    {% if resumen %}
+    <h2>Resultado</h2>
+    <div class="resumen-cifras">
+        <span><strong>Filas procesadas:</strong> {{ resumen.total }}</span>
+        <span><strong>Contratos creados:</strong> {{ resumen.creados }}</span>
+        <span><strong>Contratos actualizados:</strong> {{ resumen.actualizados }}</span>
+        <span><strong>Con error:</strong> {{ resumen.con_error|length }}</span>
+    </div>
+
+    <table class="resultados">
+        <thead>
+            <tr>
+                <th>Fila</th>
+                <th>N&uacute;mero de contrato</th>
+                <th>Contrato</th>
+                <th>Error</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in resultados %}
+            <tr class="{% if r.error %}fila-error{% endif %}">
+                <td>{{ r.fila }}</td>
+                <td>{{ r.numero_contrato }}</td>
+                <td>{{ r.contrato }}</td>
+                <td>{{ r.error }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endblock %}

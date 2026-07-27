@@ -107,18 +107,18 @@
                 {% endfor %}
             </ul>
 
-            {% if jazzmin_settings.search_model %}
-                {% for search_model in jazzmin_settings.search_models_parsed %}
-                    <form action="{{ search_model.search_url }}" method="GET" class="d-flex ms-2">
-                        <div class="input-group input-group-sm">
-                            <input class="form-control form-control-navbar" name="q" type="search" placeholder="{% trans 'Search' %} {{ search_model.search_name }}..." aria-label="{% trans 'Search' %} {{ search_model.search_name }}...">
-                            <button class="btn btn-navbar" type="submit">
-                                <i class="fas fa-search"></i>
-                            </button>
-                        </div>
-                    </form>
-                {% endfor %}
-            {% endif %}
+            {% comment %}
+            Una sola caja de búsqueda global (clientes/contratos/equipos, ver
+            dashboard-busqueda) en vez de una caja separada por modelo.
+            {% endcomment %}
+            <form action="{% url 'dashboard-busqueda' %}" method="GET" class="d-flex ms-2">
+                <div class="input-group input-group-sm">
+                    <input class="form-control form-control-navbar" name="q" type="search" placeholder="{% trans 'Buscar cliente, contrato, equipo…' %}" aria-label="{% trans 'Buscar' %}">
+                    <button class="btn btn-navbar" type="submit">
+                        <i class="fas fa-search"></i>
+                    </button>
+                </div>
+            </form>
 
             <ul class="navbar-nav ms-auto">
 
@@ -466,6 +466,8 @@
 </script>
 <script src="{% static "jazzmin/js/ui-builder.js" %}"></script>
 {% endif %}
+
+<script src="{% static "core/js/plusdigital.js" %}?v={{ plusdigital_js_version }}"></script>
 
 {% block extrajs %}{% endblock %}
 

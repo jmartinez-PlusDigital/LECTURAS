@@ -19,15 +19,17 @@ from decimal import Decimal
 
 from django.db.models import Q
 
-from core.calculo_consumo import calcular_consumo
+from core.calculo_consumo import (
+    FACTOR_ANOMALIA_DEFAULT,
+    MESES_HISTORIAL_DEFAULT,
+    calcular_consumo,
+    promedio_historico_mensual,
+)
 from core.models import Asignacion, Lectura, MetodoLectura
 
 from .tipos import AlertaAuditoria, ResultadoAuditoria
 
-DIAS_MES_APROX = 30
 DIAS_FALLA_SINCRONIZACION_DEFAULT = 5
-MESES_HISTORIAL_DEFAULT = 6
-FACTOR_ANOMALIA_DEFAULT = Decimal("3.5")
 
 
 def auditar_contrato(
@@ -161,7 +163,7 @@ def _auditar_asignacion(
     # (f) Anomalía estadística sobre el consumo total del periodo.
     if lecturas_periodo:
         for categoria, consumo_periodo in (("bn", consumo_bn_periodo), ("color", consumo_color_periodo)):
-            promedio = _promedio_historico_mensual(equipo, categoria, fecha_inicio, meses_historial)
+            promedio = promedio_historico_mensual(equipo, categoria, fecha_inicio, meses_historial)
             if promedio and consumo_periodo > float(factor_anomalia) * promedio:
                 resultado.alertas.append(
                     AlertaAuditoria(
@@ -175,39 +177,3 @@ def _auditar_asignacion(
                         datos={"consumo": consumo_periodo, "promedio_historico": promedio},
                     )
                 )
-
-
-def _promedio_historico_mensual(equipo, categoria: str, antes_de: date, meses: int) -> float | None:
-    """Promedio de consumo mensual del equipo en los `meses` anteriores a `antes_de`.
-
-    Agrupa por mes calendario (la suma de deltas diarios dentro de un mes es
-    igual al consumo total del mes, sin importar la granularidad real de las
-    lecturas) y promedia esos totales mensuales. Devuelve None si no hay
-    suficiente historial para establecer una base confiable.
-    """
-    desde = antes_de - timedelta(days=meses * DIAS_MES_APROX)
-    lecturas = list(
-        Lectura.objects.filter(asignacion__equipo=equipo, fecha__gte=desde, fecha__lt=antes_de)
-        .select_related("asignacion")
-        .order_by("fecha")
-    )
-    if len(lecturas) < 2:
-        return None
-
-    consumo_por_mes: dict[tuple[int, int], int] = {}
-    for lectura in lecturas:
-        resultado_consumo = calcular_consumo(lectura.asignacion, lectura)
-        if resultado_consumo.lectura_invertida_bn or resultado_consumo.lectura_invertida_color:
-            continue
-        if resultado_consumo.es_primera_lectura_asignacion:
-            # El salto contra la lectura de referencia inicial no representa
-            # consumo real del periodo anterior; se excluye del promedio.
-            continue
-        consumo = resultado_consumo.consumo_bn if categoria == "bn" else resultado_consumo.consumo_color
-        clave_mes = (lectura.fecha.year, lectura.fecha.month)
-        consumo_por_mes[clave_mes] = consumo_por_mes.get(clave_mes, 0) + consumo
-
-    if not consumo_por_mes:
-        return None
-    valores = list(consumo_por_mes.values())
-    return sum(valores) / len(valores)

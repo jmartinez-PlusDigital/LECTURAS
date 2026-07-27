@@ -35,6 +35,11 @@
             <div class="pd-kpi-value">{{ alertas_pendientes|length }}</div>
             {% if alertas_pendientes %}<div class="pd-kpi-delta pd-warn">{% trans 'requieren revisión antes de facturar' %}</div>{% endif %}
         </div>
+        <div class="pd-kpi">
+            <div class="pd-kpi-label">{% trans 'Alertas operativas' %}</div>
+            <div class="pd-kpi-value">{{ alertas_operativas_count }}</div>
+            {% if alertas_operativas_count %}<div class="pd-kpi-delta pd-warn">{% trans 'sin lectura o por vencer' %}</div>{% endif %}
+        </div>
         {% for fila in facturado_mes_por_moneda %}
         <div class="pd-kpi">
             <div class="pd-kpi-label">{% trans 'Facturado este mes' %} ({{ fila.moneda }})</div>
@@ -85,9 +90,9 @@
                             <td class="num">{{ contrato.equipos_activos }}</td>
                             <td>
                                 {% if perms.core.change_contrato %}
-                                <form method="post" action="{% url 'dashboard-facturar-ahora' contrato.id %}">
+                                <form method="post" action="{% url 'dashboard-facturar-ahora' contrato.id %}" class="pd-form-loading">
                                     {% csrf_token %}
-                                    <button type="submit" class="btn btn-sm btn-primary">{% trans 'Facturar ahora' %}</button>
+                                    <button type="submit" class="btn btn-sm btn-primary" data-pd-texto-carga="Facturando…">{% trans 'Facturar ahora' %}</button>
                                 </form>
                                 {% endif %}
                             </td>
@@ -152,6 +157,89 @@
                         </tr>
                         {% empty %}
                         <tr><td colspan="4">{% trans 'Todavía no hay facturas generadas.' %}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="pd-panels">
+        <div class="pd-panel">
+            <div class="pd-panel-head">
+                <h2>{% trans 'Sin lectura, corte próximo' %}</h2>
+                <span class="pd-hint">{% trans 'próximos 5 días' %}</span>
+            </div>
+            <div class="pd-table-wrap">
+                <table>
+                    <thead><tr><th>{% trans 'Contrato' %}</th><th>{% trans 'Cliente' %}</th><th>{% trans 'Corte' %}</th></tr></thead>
+                    <tbody>
+                        {% for contrato in contratos_sin_lectura %}
+                        <tr>
+                            <td class="mono">{{ contrato.numero_contrato }}</td>
+                            <td>{{ contrato.cliente.nombre }}</td>
+                            <td><span class="pd-chip pd-chip-alert">{{ contrato.proximo_corte|date:"d/m" }}</span></td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="3">{% trans 'Todos los contratos con corte próximo ya tienen lectura este mes.' %}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="pd-panel">
+            <div class="pd-panel-head">
+                <h2>{% trans 'Contratos por vencer' %}</h2>
+                <span class="pd-hint">{% trans 'próximos 30 días' %}</span>
+            </div>
+            <div class="pd-table-wrap">
+                <table>
+                    <thead><tr><th>{% trans 'Contrato' %}</th><th>{% trans 'Cliente' %}</th><th>{% trans 'Vence' %}</th></tr></thead>
+                    <tbody>
+                        {% for contrato in contratos_por_vencer %}
+                        <tr>
+                            <td class="mono">{{ contrato.numero_contrato }}</td>
+                            <td>{{ contrato.cliente.nombre }}</td>
+                            <td><span class="pd-chip pd-chip-alert">{{ contrato.fecha_fin|date:"d/m/Y" }}</span></td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="3">{% trans 'Sin contratos por vencer en los próximos 30 días.' %}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="pd-panels">
+        <div class="pd-panel pd-panel-full">
+            <div class="pd-panel-head">
+                <h2>{% trans 'Advertencias de consumo' %}</h2>
+                <span class="pd-hint">{% trans 'facturas aprobadas con consumo atípico, últimos 30 días' %}</span>
+            </div>
+            <div class="pd-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{% trans 'Contrato' %}</th>
+                            <th>{% trans 'Cliente' %}</th>
+                            <th>{% trans 'Equipo' %}</th>
+                            <th>{% trans 'Detalle' %}</th>
+                            <th>{% trans 'Fecha' %}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for adv in advertencias_consumo %}
+                        <tr>
+                            <td class="mono">{{ adv.contrato.numero_contrato }}</td>
+                            <td>{{ adv.contrato.cliente.nombre }}</td>
+                            <td class="mono">{{ adv.equipo }}</td>
+                            <td>{{ adv.mensaje }}</td>
+                            <td>{{ adv.timestamp|date:"d/m/Y" }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="5">{% trans 'Sin advertencias de consumo en los últimos 30 días.' %}</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

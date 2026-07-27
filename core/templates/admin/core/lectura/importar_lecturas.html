@@ -16,6 +16,7 @@
     .importar-lecturas table.resultados td { border: 1px solid #ccc; padding: 4px 8px; font-size: 12.5px; text-align: left; }
     .importar-lecturas table.resultados th { background: #f4f4f4; }
     .importar-lecturas tr.fila-error td { background: #fff2f2; }
+    .importar-lecturas tr.fila-advertencia td { background: #fdf7e6; }
     .importar-lecturas .resumen-cifras { margin: 10px 0; }
     .importar-lecturas .resumen-cifras span { margin-right: 18px; }
 </style>
@@ -38,7 +39,7 @@
         </p>
     </div>
 
-    <form method="post" enctype="multipart/form-data">
+    <form method="post" enctype="multipart/form-data" class="pd-form-loading">
         {% csrf_token %}
         <div class="form-row">
             {{ form.archivo.label_tag }} {{ form.archivo }}
@@ -48,7 +49,7 @@
             <label for="{{ form.dry_run.id_for_label }}">{{ form.dry_run }} {{ form.dry_run.label }}</label>
         </div>
         <div class="submit-row">
-            <input type="submit" value="Procesar archivo" class="default">
+            <input type="submit" value="Procesar archivo" class="default" data-pd-texto-carga="Procesando archivo…">
         </div>
     </form>
 
@@ -58,6 +59,7 @@
         <span><strong>Filas procesadas:</strong> {{ resumen.total }}</span>
         <span><strong>Lecturas creadas:</strong> {{ resumen.creadas }}</span>
         <span><strong>Lecturas actualizadas:</strong> {{ resumen.actualizadas }}</span>
+        <span><strong>Con advertencia:</strong> {{ resumen.con_advertencia|length }}</span>
         <span><strong>Con error:</strong> {{ resumen.con_error|length }}</span>
     </div>
 
@@ -68,16 +70,18 @@
                 <th>N&uacute;mero de serie</th>
                 <th>Fecha</th>
                 <th>Lectura</th>
+                <th>Advertencia</th>
                 <th>Error</th>
             </tr>
         </thead>
         <tbody>
             {% for r in resultados %}
-            <tr class="{% if r.error %}fila-error{% endif %}">
+            <tr class="{% if r.error %}fila-error{% elif r.advertencia %}fila-advertencia{% endif %}">
                 <td>{{ r.fila }}</td>
                 <td>{{ r.numero_serie }}</td>
                 <td>{{ r.fecha }}</td>
                 <td>{{ r.lectura }}</td>
+                <td>{{ r.advertencia }}</td>
                 <td>{{ r.error }}</td>
             </tr>
             {% endfor %}

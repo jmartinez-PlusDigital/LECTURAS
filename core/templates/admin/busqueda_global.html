@@ -1,0 +1,94 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Inicio</a> &rsaquo; Buscar
+</div>
+{% endblock %}
+
+{% block content_title %}Buscar{% endblock %}
+
+{% block content %}
+<div id="content-main" class="pd-busqueda">
+    <form method="get" action="{% url 'dashboard-busqueda' %}" class="pd-busqueda-form">
+        <input type="search" name="q" value="{{ query }}" class="pd-filter-select pd-busqueda-input"
+               placeholder="Buscar cliente, contrato o número de serie…" autofocus>
+        <button type="submit" class="btn btn-primary">Buscar</button>
+    </form>
+
+    {% if query %}
+    <p class="pd-hint">{{ total }} resultado(s) para &ldquo;{{ query }}&rdquo;.</p>
+
+    <div class="pd-panels pd-busqueda-panels">
+        <div class="pd-panel pd-panel-full">
+            <div class="pd-panel-head"><h2>Clientes ({{ clientes|length }})</h2></div>
+            <div class="pd-table-wrap">
+                <table>
+                    <thead><tr><th>Nombre</th><th>RFC</th><th>Contacto</th></tr></thead>
+                    <tbody>
+                        {% for c in clientes %}
+                        <tr>
+                            <td><a href="{% url 'admin:core_cliente_change' c.pk %}">{{ c.nombre }}</a></td>
+                            <td class="mono">{{ c.rfc|default:"—" }}</td>
+                            <td>{{ c.contacto_email|default:"—" }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="3">Sin coincidencias.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="pd-panel pd-panel-full">
+            <div class="pd-panel-head"><h2>Contratos ({{ contratos|length }})</h2></div>
+            <div class="pd-table-wrap">
+                <table>
+                    <thead><tr><th>Contrato</th><th>Cliente</th><th>Estado</th><th>Moneda</th></tr></thead>
+                    <tbody>
+                        {% for ct in contratos %}
+                        <tr>
+                            <td class="mono"><a href="{% url 'admin:core_contrato_change' ct.pk %}">{{ ct.numero_contrato }}</a></td>
+                            <td>{{ ct.cliente.nombre }}</td>
+                            <td>{{ ct.get_estado_display }}</td>
+                            <td>{{ ct.moneda }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4">Sin coincidencias.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="pd-panel pd-panel-full">
+            <div class="pd-panel-head"><h2>Equipos ({{ equipos|length }})</h2></div>
+            <div class="pd-table-wrap">
+                <table>
+                    <thead><tr><th>Número de serie</th><th>Marca / Modelo</th><th>Contrato actual</th><th>Cliente actual</th></tr></thead>
+                    <tbody>
+                        {% for e in equipos %}
+                        <tr>
+                            <td class="mono"><a href="{% url 'admin:core_equipo_change' e.pk %}">{{ e.numero_serie }}</a></td>
+                            <td>{{ e.marca }} {{ e.modelo }}</td>
+                            <td>
+                                {% if e.asignacion_activa %}{{ e.asignacion_activa.contrato.numero_contrato }}{% else %}—{% endif %}
+                            </td>
+                            <td>
+                                {% if e.asignacion_activa %}{{ e.asignacion_activa.contrato.cliente.nombre }}{% else %}—{% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4">Sin coincidencias.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <p class="pd-hint">Escribe un nombre de cliente, número de contrato o número de serie de equipo.</p>
+    {% endif %}
+</div>
+{% endblock %}

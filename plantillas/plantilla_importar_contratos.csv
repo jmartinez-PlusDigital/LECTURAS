@@ -1,0 +1,3 @@
+numero_contrato,cliente,moneda,renta_base,copias_incluidas_bn,copias_incluidas_color,costo_excedente_bn,costo_excedente_color,iva_porcentaje,dia_corte_facturacion,estado,fecha_inicio,fecha_fin
+CT-0001,Cliente Ejemplo SA,MXN,1500.00,3000,500,0.50,1.50,16.00,1,activo,2026-01-01,
+CT-0002,Otro Cliente Ejemplo,USD,300.00,5000,1000,0.02,0.06,16.00,15,activo,2026-01-15,

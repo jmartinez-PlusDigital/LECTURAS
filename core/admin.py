@@ -5,6 +5,7 @@ from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db.models import Q
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import path, reverse
@@ -15,6 +16,10 @@ from django.utils.html import format_html, format_html_join
 from core.dashboard import contexto_dashboard
 from core.historial_lecturas import generar_excel_historial, historial_de_contrato
 from core.importacion_3manager import importar_equipos_de_cliente_3manager
+from core.importacion_clientes import procesar_archivo_clientes
+from core.importacion_clientes import resumen_de as resumen_de_clientes
+from core.importacion_contratos import procesar_archivo_contratos
+from core.importacion_contratos import resumen_de as resumen_de_contratos
 from core.importacion_equipos import procesar_archivo_equipos
 from core.importacion_equipos import resumen_de as resumen_de_equipos
 from core.importacion_lecturas import generar_plantilla_lecturas, procesar_archivo_lecturas
@@ -94,8 +99,22 @@ def importar_equipos_3manager(modeladmin, request, queryset):
             messages.warning(request, f"{cliente.nombre}: {len(con_error)} con error — {detalle}")
 
 
+class ImportarClientesForm(forms.Form):
+    archivo = forms.FileField(label="Archivo (.csv, .xlsx o .xls)")
+    dry_run = forms.BooleanField(
+        label="Solo validar, no guardar todavía", required=False, initial=True
+    )
+
+    def clean_archivo(self):
+        archivo = self.cleaned_data["archivo"]
+        if not archivo.name.lower().endswith((".csv", ".xlsx", ".xls")):
+            raise ValidationError("El archivo debe ser .csv, .xlsx o .xls.")
+        return archivo
+
+
 @admin.register(Cliente)
 class ClienteAdmin(admin.ModelAdmin):
+    change_list_template = "admin/core/cliente/change_list.html"
     list_display = (
         "nombre",
         "razon_social",
@@ -116,6 +135,66 @@ class ClienteAdmin(admin.ModelAdmin):
         return format_html(
             '<a href="{}?asignaciones__contrato__cliente__id__exact={}">Ver equipos</a>', url, obj.pk
         )
+
+    def get_urls(self):
+        urls = [
+            path(
+                "importar/",
+                self.admin_site.admin_view(self.importar_clientes_view),
+                name="core_cliente_importar",
+            ),
+            path(
+                "importar/plantilla/",
+                self.admin_site.admin_view(self.descargar_plantilla_view),
+                name="core_cliente_importar_plantilla",
+            ),
+        ]
+        return urls + super().get_urls()
+
+    def importar_clientes_view(self, request):
+        if not self.has_add_permission(request):
+            raise PermissionDenied
+
+        resultados = None
+        resumen = None
+
+        if request.method == "POST":
+            form = ImportarClientesForm(request.POST, request.FILES)
+            if form.is_valid():
+                archivo = form.cleaned_data["archivo"]
+                dry_run = form.cleaned_data["dry_run"]
+                resultados = procesar_archivo_clientes(archivo, archivo.name, dry_run=dry_run)
+                if not resultados:
+                    messages.warning(request, "El archivo no tiene filas de datos.")
+                else:
+                    resumen = resumen_de_clientes(resultados)
+                    if dry_run:
+                        messages.info(request, "Validación en seco: no se guardó ningún cambio todavía.")
+                    elif resumen["con_error"]:
+                        messages.warning(
+                            request,
+                            f"Importación completada con {len(resumen['con_error'])} fila(s) con error.",
+                        )
+                    else:
+                        messages.success(request, f"Importación completada: {resumen['total']} fila(s) procesadas.")
+        else:
+            form = ImportarClientesForm()
+
+        contexto = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "title": "Importar clientes",
+            "form": form,
+            "resultados": resultados,
+            "resumen": resumen,
+        }
+        return render(request, "admin/core/cliente/importar_clientes.html", contexto)
+
+    def descargar_plantilla_view(self, request):
+        if not self.has_add_permission(request):
+            raise PermissionDenied
+        ruta = Path(settings.BASE_DIR) / "plantillas" / "plantilla_importar_clientes.csv"
+        return FileResponse(open(ruta, "rb"), as_attachment=True, filename=ruta.name)
 
 
 def _leer_rango_fechas(request):
@@ -175,6 +254,47 @@ def dashboard_view(request):
     return render(request, "admin/index.html", contexto)
 
 
+def busqueda_global_view(request):
+    """Búsqueda de un cliente/contrato/equipo desde una sola caja en el
+    navbar, en vez de tener que adivinar en qué listado buscar. Reemplaza
+    las tres cajas de búsqueda por-modelo que ponía Jazzmin (ver
+    `admin/base.html`, ya no se usan)."""
+    query = (request.GET.get("q") or "").strip()
+
+    clientes = contratos = equipos = []
+    if query:
+        clientes = list(
+            Cliente.objects.filter(
+                Q(nombre__icontains=query) | Q(razon_social__icontains=query) | Q(rfc__icontains=query)
+            ).order_by("nombre")[:20]
+        )
+        contratos = list(
+            Contrato.objects.select_related("cliente")
+            .filter(Q(numero_contrato__icontains=query) | Q(cliente__nombre__icontains=query))
+            .order_by("numero_contrato")[:20]
+        )
+        equipos = list(
+            Equipo.objects.prefetch_related("asignaciones__contrato__cliente")
+            .filter(Q(numero_serie__icontains=query) | Q(marca__icontains=query) | Q(modelo__icontains=query))
+            .order_by("numero_serie")[:20]
+        )
+        for equipo in equipos:
+            equipo.asignacion_activa = next(
+                (a for a in equipo.asignaciones.all() if a.fecha_fin is None), None
+            )
+
+    contexto = {
+        **admin.site.each_context(request),
+        "title": f"Buscar: {query}" if query else "Buscar",
+        "query": query,
+        "clientes": clientes,
+        "contratos": contratos,
+        "equipos": equipos,
+        "total": len(clientes) + len(contratos) + len(equipos),
+    }
+    return render(request, "admin/busqueda_global.html", contexto)
+
+
 def facturar_uno_ahora_view(request, contrato_id):
     if request.method != "POST":
         raise PermissionDenied
@@ -212,9 +332,23 @@ class ContratoForm(forms.ModelForm):
         return cleaned_data
 
 
+class ImportarContratosForm(forms.Form):
+    archivo = forms.FileField(label="Archivo (.csv, .xlsx o .xls)")
+    dry_run = forms.BooleanField(
+        label="Solo validar, no guardar todavía", required=False, initial=True
+    )
+
+    def clean_archivo(self):
+        archivo = self.cleaned_data["archivo"]
+        if not archivo.name.lower().endswith((".csv", ".xlsx", ".xls")):
+            raise ValidationError("El archivo debe ser .csv, .xlsx o .xls.")
+        return archivo
+
+
 @admin.register(Contrato)
 class ContratoAdmin(admin.ModelAdmin):
     form = ContratoForm
+    change_list_template = "admin/core/contrato/change_list.html"
     list_display = (
         "numero_contrato",
         "cliente",
@@ -255,8 +389,63 @@ class ContratoAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.historial_lecturas_excel_view),
                 name="core_contrato_historial_lecturas_excel",
             ),
+            path(
+                "importar/",
+                self.admin_site.admin_view(self.importar_contratos_view),
+                name="core_contrato_importar",
+            ),
+            path(
+                "importar/plantilla/",
+                self.admin_site.admin_view(self.descargar_plantilla_contratos_view),
+                name="core_contrato_importar_plantilla",
+            ),
         ]
         return urls + super().get_urls()
+
+    def importar_contratos_view(self, request):
+        if not self.has_add_permission(request):
+            raise PermissionDenied
+
+        resultados = None
+        resumen = None
+
+        if request.method == "POST":
+            form = ImportarContratosForm(request.POST, request.FILES)
+            if form.is_valid():
+                archivo = form.cleaned_data["archivo"]
+                dry_run = form.cleaned_data["dry_run"]
+                resultados = procesar_archivo_contratos(archivo, archivo.name, dry_run=dry_run)
+                if not resultados:
+                    messages.warning(request, "El archivo no tiene filas de datos.")
+                else:
+                    resumen = resumen_de_contratos(resultados)
+                    if dry_run:
+                        messages.info(request, "Validación en seco: no se guardó ningún cambio todavía.")
+                    elif resumen["con_error"]:
+                        messages.warning(
+                            request,
+                            f"Importación completada con {len(resumen['con_error'])} fila(s) con error.",
+                        )
+                    else:
+                        messages.success(request, f"Importación completada: {resumen['total']} fila(s) procesadas.")
+        else:
+            form = ImportarContratosForm()
+
+        contexto = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "title": "Importar contratos",
+            "form": form,
+            "resultados": resultados,
+            "resumen": resumen,
+        }
+        return render(request, "admin/core/contrato/importar_contratos.html", contexto)
+
+    def descargar_plantilla_contratos_view(self, request):
+        if not self.has_add_permission(request):
+            raise PermissionDenied
+        ruta = Path(settings.BASE_DIR) / "plantillas" / "plantilla_importar_contratos.csv"
+        return FileResponse(open(ruta, "rb"), as_attachment=True, filename=ruta.name)
 
     def historial_lecturas_view(self, request, contrato_id):
         contrato = get_object_or_404(Contrato, pk=contrato_id)
@@ -475,6 +664,19 @@ class AsignacionForm(forms.ModelForm):
         return cleaned_data
 
 
+def _avisar_lecturas_con_anomalia(request, lecturas):
+    """Muestra un `messages.warning` por cada Lectura cuyo `save()` la marcó
+    con `estado_auditoria=ALERTA` (consumo fuera de lo normal para el
+    equipo, ver `core.calculo_consumo.detectar_anomalias`). No bloquea nada:
+    la lectura ya se guardó, esto solo avisa para revisión."""
+    for lectura in lecturas:
+        if lectura.estado_auditoria != Lectura.EstadoAuditoria.ALERTA:
+            continue
+        mensajes = [a["mensaje"] for a in lectura.detalle_auditoria.get("advertencias", [])]
+        detalle = " ".join(mensajes) or "Consumo fuera de lo normal para este equipo."
+        messages.warning(request, f"{lectura.asignacion.equipo.numero_serie} ({lectura.fecha}): {detalle}")
+
+
 @admin.register(Asignacion)
 class AsignacionAdmin(admin.ModelAdmin):
     form = AsignacionForm
@@ -488,6 +690,11 @@ class AsignacionAdmin(admin.ModelAdmin):
     @admin.display(boolean=True, description="Activa")
     def esta_activa(self, obj):
         return obj.fecha_fin is None
+
+    def save_formset(self, request, form, formset, change):
+        if formset.model is not Lectura:
+            return super().save_formset(request, form, formset, change)
+        _avisar_lecturas_con_anomalia(request, formset.save())
 
 
 class LecturaForm(forms.ModelForm):
@@ -520,6 +727,10 @@ class LecturaAdmin(admin.ModelAdmin):
     search_fields = ("asignacion__equipo__numero_serie", "asignacion__contrato__numero_contrato")
     autocomplete_fields = ("asignacion",)
     date_hierarchy = "fecha"
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        _avisar_lecturas_con_anomalia(request, [obj])
 
     def get_urls(self):
         urls = [

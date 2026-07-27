@@ -1,0 +1,3 @@
+nombre,razon_social,rfc,contacto_nombre,contacto_email,contacto_telefono,direccion,activo,id_cuenta_3manager
+Cliente Ejemplo SA,Cliente Ejemplo SA de CV,CEJ010101AAA,Juan Pérez,juan.perez@ejemplo.com,5555555555,Av. Ejemplo 123,true,
+Otro Cliente Ejemplo,,,,,,,true,3f2b1a90-aaaa-bbbb-cccc-1234567890ab

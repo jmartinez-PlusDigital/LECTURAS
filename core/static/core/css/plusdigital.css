@@ -205,3 +205,34 @@ a { color: var(--pd-navy-700); }
 @media (max-width: 620px) {
     .pd-kpis, .pd-quick-grid { grid-template-columns: 1fr; }
 }
+
+/* --- Feedback visual en botones de acciones largas (plusdigital.js) --- */
+.pd-btn-loading {
+    position: relative;
+    padding-left: 30px !important;
+    opacity: .85;
+    cursor: wait !important;
+    pointer-events: none;
+}
+.pd-btn-loading::before {
+    content: "";
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    width: 14px;
+    height: 14px;
+    margin-top: -7px;
+    border: 2px solid rgba(127, 127, 127, .35);
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: pd-spin .6s linear infinite;
+}
+@keyframes pd-spin { to { transform: rotate(360deg); } }
+
+/* --- Búsqueda global (admin/busqueda_global.html) --- */
+.pd-busqueda-form { display: flex; gap: 8px; margin-bottom: 18px; max-width: 560px; }
+.pd-busqueda-input { flex: 1; max-width: none; padding: 8px 12px; font-size: 13.5px; }
+.pd-busqueda-panels { grid-template-columns: 1fr; }
+
+/* --- Alertas operativas del dashboard --- */
+.pd-chip-alert { background: var(--pd-warning-bg); color: var(--pd-warning-fg); }

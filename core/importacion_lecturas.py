@@ -36,7 +36,7 @@ from django.utils.dateparse import parse_date
 from core.archivos import leer_filas
 from core.models import Asignacion, Contrato, Equipo, Lectura, MetodoLectura
 
-COLUMNAS_REPORTE = ["fila", "numero_serie", "fecha", "lectura", "error"]
+COLUMNAS_REPORTE = ["fila", "numero_serie", "fecha", "lectura", "advertencia", "error"]
 
 
 def procesar_archivo_lecturas(archivo, nombre_archivo: str, *, dry_run: bool = False) -> list[dict]:
@@ -61,11 +61,13 @@ def procesar_archivo_lecturas(archivo, nombre_archivo: str, *, dry_run: bool = F
 
 def resumen_de(resultados: list[dict]) -> dict:
     con_error = [r for r in resultados if r["error"]]
+    con_advertencia = [r for r in resultados if r["advertencia"]]
     return {
         "total": len(resultados),
         "creadas": sum(1 for r in resultados if r["lectura"] == "creada"),
         "actualizadas": sum(1 for r in resultados if r["lectura"] == "actualizada"),
         "con_error": con_error,
+        "con_advertencia": con_advertencia,
     }
 
 
@@ -139,7 +141,14 @@ def generar_plantilla_lecturas(contratos) -> bytes:
 # --- procesamiento por fila ------------------------------------------------
 
 def _procesar_fila(numero_fila: int, fila: dict) -> dict:
-    resultado = {"fila": numero_fila, "numero_serie": "", "fecha": "", "lectura": "", "error": ""}
+    resultado = {
+        "fila": numero_fila,
+        "numero_serie": "",
+        "fecha": "",
+        "lectura": "",
+        "advertencia": "",
+        "error": "",
+    }
     try:
         with transaction.atomic():
             numero_serie = _texto(fila.get("numero_serie"))
@@ -179,7 +188,7 @@ def _procesar_fila(numero_fila: int, fila: dict) -> dict:
             if lectura_bn is None or lectura_color is None:
                 raise ValueError("lectura_bn y lectura_color son requeridas")
 
-            _, creada = Lectura.objects.update_or_create(
+            lectura, creada = Lectura.objects.update_or_create(
                 asignacion=asignacion,
                 fecha=fecha,
                 defaults={
@@ -189,6 +198,9 @@ def _procesar_fila(numero_fila: int, fila: dict) -> dict:
                 },
             )
             resultado["lectura"] = "creada" if creada else "actualizada"
+            if lectura.estado_auditoria == Lectura.EstadoAuditoria.ALERTA:
+                mensajes = [a["mensaje"] for a in lectura.detalle_auditoria.get("advertencias", [])]
+                resultado["advertencia"] = " ".join(mensajes)
     except Exception as exc:  # noqa: BLE001 - se aísla el error por fila a propósito
         resultado["lectura"] = ""
         resultado["error"] = str(exc)

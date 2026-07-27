@@ -1,0 +1,86 @@
+{% extends "admin/base_site.html" %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Inicio</a>
+    &rsaquo; <a href="{% url 'admin:core_cliente_changelist' %}">Clientes</a>
+    &rsaquo; Importar clientes
+</div>
+{% endblock %}
+
+{% block content %}
+<style>
+    .importar-clientes .ayuda { max-width: 780px; margin-bottom: 16px; }
+    .importar-clientes table.resultados { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    .importar-clientes table.resultados th,
+    .importar-clientes table.resultados td { border: 1px solid #ccc; padding: 4px 8px; font-size: 12.5px; text-align: left; }
+    .importar-clientes table.resultados th { background: #f4f4f4; }
+    .importar-clientes tr.fila-error td { background: #fff2f2; }
+    .importar-clientes .resumen-cifras { margin: 10px 0; }
+    .importar-clientes .resumen-cifras span { margin-right: 18px; }
+</style>
+
+<div id="content-main" class="importar-clientes">
+    <div class="ayuda">
+        <p>
+            Sube un archivo <strong>.csv</strong> o <strong>.xlsx</strong> con clientes para crear/actualizar
+            en batch — primer paso de la carga masiva (Cliente &rarr; Contrato &rarr; Equipo &rarr; Lectura).
+            <a href="{% url 'admin:core_cliente_importar_plantilla' %}">Descargar plantilla de ejemplo</a>.
+        </p>
+        <p>
+            Columnas: <code>nombre</code> (requerido, clave de emparejamiento), <code>razon_social</code>,
+            <code>rfc</code>, <code>contacto_nombre</code>, <code>contacto_email</code>,
+            <code>contacto_telefono</code>, <code>direccion</code>, <code>activo</code> (si/no, default si),
+            <code>id_cuenta_3manager</code>. Si ya existe un cliente con ese nombre, se actualiza en vez de
+            duplicarse. Si llenas <code>id_cuenta_3manager</code> para un cliente que ya está en 3-Manager,
+            después puedes seleccionarlo en el listado y usar la acción &ldquo;3-Manager: importar equipos de
+            la cuenta&rdquo; para traer sus equipos automáticamente.
+        </p>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" class="pd-form-loading">
+        {% csrf_token %}
+        <div class="form-row">
+            {{ form.archivo.label_tag }} {{ form.archivo }}
+            {% if form.archivo.errors %}<p class="errornote">{{ form.archivo.errors|join:", " }}</p>{% endif %}
+        </div>
+        <div class="form-row">
+            <label for="{{ form.dry_run.id_for_label }}">{{ form.dry_run }} {{ form.dry_run.label }}</label>
+        </div>
+        <div class="submit-row">
+            <input type="submit" value="Procesar archivo" class="default" data-pd-texto-carga="Procesando archivo…">
+        </div>
+    </form>
+
+    {% if resumen %}
+    <h2>Resultado</h2>
+    <div class="resumen-cifras">
+        <span><strong>Filas procesadas:</strong> {{ resumen.total }}</span>
+        <span><strong>Clientes creados:</strong> {{ resumen.creados }}</span>
+        <span><strong>Clientes actualizados:</strong> {{ resumen.actualizados }}</span>
+        <span><strong>Con error:</strong> {{ resumen.con_error|length }}</span>
+    </div>
+
+    <table class="resultados">
+        <thead>
+            <tr>
+                <th>Fila</th>
+                <th>Nombre</th>
+                <th>Cliente</th>
+                <th>Error</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in resultados %}
+            <tr class="{% if r.error %}fila-error{% endif %}">
+                <td>{{ r.fila }}</td>
+                <td>{{ r.nombre }}</td>
+                <td>{{ r.cliente }}</td>
+                <td>{{ r.error }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endblock %}

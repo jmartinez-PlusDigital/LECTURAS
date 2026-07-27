@@ -5,11 +5,20 @@ from decimal import Decimal
 from django.test import TestCase
 from django.utils import timezone
 
-from core.dashboard import _facturado_mes_por_moneda, _ultimos_n_meses, excedente_mensual, facturacion_mensual
+from auditoria.tipos import AlertaAuditoria, ResultadoAuditoria
+from core.dashboard import (
+    _advertencias_consumo_recientes,
+    _facturado_mes_por_moneda,
+    _ultimos_n_meses,
+    excedente_mensual,
+    facturacion_mensual,
+)
 from core.historial_lecturas import historial_de_contrato
+from core.importacion_clientes import procesar_archivo_clientes
+from core.importacion_contratos import procesar_archivo_contratos
 from core.importacion_lecturas import generar_plantilla_lecturas, procesar_archivo_lecturas
-from core.models import Asignacion, Cliente, Contrato, Equipo, Factura, Lectura
-from core.procesamiento_facturacion import _calcular_periodo
+from core.models import Asignacion, Cliente, Contrato, Equipo, Factura, Lectura, LogEjecucion
+from core.procesamiento_facturacion import _advertencias_de, _calcular_periodo
 
 
 class CalcularPeriodoTestCase(TestCase):
@@ -165,6 +174,151 @@ class ImportacionLecturasTestCase(TestCase):
         self.assertIn("SN-LEC-1", contenido)
         self.assertIn("SN-LEC-2", contenido)
         self.assertIn("CT-LEC-1", contenido)
+
+    def test_lectura_con_consumo_anomalo_reporta_advertencia_sin_bloquear(self):
+        # Historial estable de 1000/mes.
+        contador = 0
+        for mes in range(1, 7):
+            contador += 1000
+            Lectura.objects.create(
+                asignacion=self.asignacion1, fecha=date(2026, mes, 1), lectura_bn=contador, lectura_color=0,
+                origen="manual",
+            )
+
+        contenido = f"numero_serie,fecha,lectura_bn,lectura_color\nSN-LEC-1,2026-07-01,{contador + 10000},0\n"
+        resultados = procesar_archivo_lecturas(_archivo(contenido), "lecturas.csv")
+
+        self.assertEqual(resultados[0]["error"], "")
+        self.assertEqual(resultados[0]["lectura"], "creada")
+        self.assertIn("BN", resultados[0]["advertencia"])
+        lectura = Lectura.objects.get(asignacion=self.asignacion1, fecha=date(2026, 7, 1))
+        self.assertEqual(lectura.estado_auditoria, Lectura.EstadoAuditoria.ALERTA)
+
+
+class ImportacionClientesTestCase(TestCase):
+    def test_crea_cliente(self):
+        contenido = "nombre,rfc,activo\nCliente Importado SA,CIM010101AAA,true\n"
+        resultados = procesar_archivo_clientes(_archivo(contenido), "clientes.csv")
+
+        self.assertEqual(resultados[0]["error"], "")
+        self.assertEqual(resultados[0]["cliente"], "creado")
+        cliente = Cliente.objects.get(nombre="Cliente Importado SA")
+        self.assertEqual(cliente.rfc, "CIM010101AAA")
+        self.assertTrue(cliente.activo)
+
+    def test_reprocesar_actualiza_en_vez_de_duplicar(self):
+        primero = "nombre,rfc\nCliente Dup,RFC-1\n"
+        segundo = "nombre,rfc\nCliente Dup,RFC-2\n"
+        procesar_archivo_clientes(_archivo(primero), "clientes.csv")
+        resultados = procesar_archivo_clientes(_archivo(segundo), "clientes.csv")
+
+        self.assertEqual(resultados[0]["cliente"], "actualizado")
+        self.assertEqual(Cliente.objects.filter(nombre="Cliente Dup").count(), 1)
+        self.assertEqual(Cliente.objects.get(nombre="Cliente Dup").rfc, "RFC-2")
+
+    def test_nombre_vacio_es_error_y_no_detiene_las_demas(self):
+        contenido = "nombre,rfc\n,RFC-X\nCliente Valido,RFC-Y\n"
+        resultados = procesar_archivo_clientes(_archivo(contenido), "clientes.csv")
+
+        self.assertIn("nombre es requerido", resultados[0]["error"])
+        self.assertEqual(resultados[1]["error"], "")
+        self.assertTrue(Cliente.objects.filter(nombre="Cliente Valido").exists())
+
+    def test_activo_por_defecto_es_true_si_se_omite(self):
+        contenido = "nombre\nCliente Sin Activo\n"
+        procesar_archivo_clientes(_archivo(contenido), "clientes.csv")
+
+        self.assertTrue(Cliente.objects.get(nombre="Cliente Sin Activo").activo)
+
+    def test_dry_run_no_persiste_nada(self):
+        contenido = "nombre\nCliente Dry Run\n"
+        resultados = procesar_archivo_clientes(_archivo(contenido), "clientes.csv", dry_run=True)
+
+        self.assertEqual(resultados[0]["cliente"], "creado")
+        self.assertFalse(Cliente.objects.filter(nombre="Cliente Dry Run").exists())
+
+
+class ImportacionContratosTestCase(TestCase):
+    def setUp(self):
+        self.cliente = Cliente.objects.create(nombre="Cliente Contratos Test")
+
+    def test_crea_contrato_para_cliente_existente(self):
+        contenido = (
+            "numero_contrato,cliente,renta_base,costo_excedente_bn,costo_excedente_color,"
+            "dia_corte_facturacion,fecha_inicio\n"
+            f"CT-IMP-1,{self.cliente.nombre},1500.00,0.50,1.50,1,2026-01-01\n"
+        )
+        resultados = procesar_archivo_contratos(_archivo(contenido), "contratos.csv")
+
+        self.assertEqual(resultados[0]["error"], "")
+        self.assertEqual(resultados[0]["contrato"], "creado")
+        contrato = Contrato.objects.get(numero_contrato="CT-IMP-1")
+        self.assertEqual(contrato.cliente, self.cliente)
+        self.assertEqual(contrato.moneda, "MXN")  # default al omitirse
+        self.assertEqual(contrato.iva_porcentaje, Decimal("16.00"))  # default al omitirse
+
+    def test_cliente_inexistente_reporta_error_y_no_detiene_las_demas(self):
+        contenido = (
+            "numero_contrato,cliente,renta_base,costo_excedente_bn,costo_excedente_color,"
+            "dia_corte_facturacion,fecha_inicio\n"
+            "CT-IMP-X,Cliente Que No Existe,1000,0.5,1.5,1,2026-01-01\n"
+            f"CT-IMP-Y,{self.cliente.nombre},1000,0.5,1.5,1,2026-01-01\n"
+        )
+        resultados = procesar_archivo_contratos(_archivo(contenido), "contratos.csv")
+
+        self.assertIn("no existe un cliente", resultados[0]["error"])
+        self.assertEqual(resultados[1]["error"], "")
+        self.assertTrue(Contrato.objects.filter(numero_contrato="CT-IMP-Y").exists())
+
+    def test_reprocesar_actualiza_en_vez_de_duplicar(self):
+        primero = (
+            "numero_contrato,cliente,renta_base,costo_excedente_bn,costo_excedente_color,"
+            "dia_corte_facturacion,fecha_inicio\n"
+            f"CT-IMP-DUP,{self.cliente.nombre},1000,0.5,1.5,1,2026-01-01\n"
+        )
+        segundo = (
+            "numero_contrato,cliente,renta_base,costo_excedente_bn,costo_excedente_color,"
+            "dia_corte_facturacion,fecha_inicio\n"
+            f"CT-IMP-DUP,{self.cliente.nombre},2000,0.5,1.5,1,2026-01-01\n"
+        )
+        procesar_archivo_contratos(_archivo(primero), "contratos.csv")
+        resultados = procesar_archivo_contratos(_archivo(segundo), "contratos.csv")
+
+        self.assertEqual(resultados[0]["contrato"], "actualizado")
+        self.assertEqual(Contrato.objects.filter(numero_contrato="CT-IMP-DUP").count(), 1)
+        self.assertEqual(Contrato.objects.get(numero_contrato="CT-IMP-DUP").renta_base, Decimal("2000"))
+
+    def test_fecha_fin_anterior_a_fecha_inicio_es_error(self):
+        contenido = (
+            "numero_contrato,cliente,renta_base,costo_excedente_bn,costo_excedente_color,"
+            "dia_corte_facturacion,fecha_inicio,fecha_fin\n"
+            f"CT-IMP-FF,{self.cliente.nombre},1000,0.5,1.5,1,2026-06-01,2026-01-01\n"
+        )
+        resultados = procesar_archivo_contratos(_archivo(contenido), "contratos.csv")
+
+        self.assertIn("fecha_fin debe ser posterior", resultados[0]["error"])
+        self.assertFalse(Contrato.objects.filter(numero_contrato="CT-IMP-FF").exists())
+
+    def test_dia_corte_fuera_de_rango_es_error(self):
+        contenido = (
+            "numero_contrato,cliente,renta_base,costo_excedente_bn,costo_excedente_color,"
+            "dia_corte_facturacion,fecha_inicio\n"
+            f"CT-IMP-DC,{self.cliente.nombre},1000,0.5,1.5,32,2026-01-01\n"
+        )
+        resultados = procesar_archivo_contratos(_archivo(contenido), "contratos.csv")
+
+        self.assertIn("dia_corte_facturacion", resultados[0]["error"])
+
+    def test_dry_run_no_persiste_nada(self):
+        contenido = (
+            "numero_contrato,cliente,renta_base,costo_excedente_bn,costo_excedente_color,"
+            "dia_corte_facturacion,fecha_inicio\n"
+            f"CT-IMP-DRY,{self.cliente.nombre},1000,0.5,1.5,1,2026-01-01\n"
+        )
+        resultados = procesar_archivo_contratos(_archivo(contenido), "contratos.csv", dry_run=True)
+
+        self.assertEqual(resultados[0]["contrato"], "creado")
+        self.assertFalse(Contrato.objects.filter(numero_contrato="CT-IMP-DRY").exists())
 
 
 class HistorialLecturasTestCase(TestCase):
@@ -399,3 +553,176 @@ class TendenciasMensualesTestCase(TestCase):
         self.assertEqual(punto_julio["color"], 100)
         self.assertEqual(punto_junio["bn"], 200)
         self.assertEqual(punto_julio["pct_bn"], 100.0)  # es el máximo de la serie
+
+
+class LecturaAnomaliaTestCase(TestCase):
+    """`Lectura.save()` marca `estado_auditoria=ALERTA` cuando el consumo
+    implícito de la lectura se sale del rango normal del equipo — validación
+    en el momento de captura, sin esperar a la auditoría de fin de mes."""
+
+    def setUp(self):
+        self.contrato = Contrato.objects.create(
+            numero_contrato="CT-ANOM-1",
+            cliente=Cliente.objects.create(nombre="Cliente Anomalia Test"),
+            renta_base=Decimal("1000.00"),
+            costo_excedente_bn=Decimal("0.50"),
+            costo_excedente_color=Decimal("1.50"),
+            dia_corte_facturacion=1,
+            fecha_inicio=date(2026, 1, 1),
+        )
+        self.equipo = Equipo.objects.create(
+            numero_serie="SN-ANOM-1", marca="Canon", modelo="X1", metodo_lectura="manual"
+        )
+        self.asignacion = Asignacion.objects.create(
+            equipo=self.equipo,
+            contrato=self.contrato,
+            fecha_inicio=date(2026, 1, 1),
+            lectura_inicial_referencia_bn=0,
+            lectura_inicial_referencia_color=0,
+        )
+
+    def _historial_estable(self, meses=6, consumo_mensual=1000):
+        contador = 0
+        for mes in range(1, meses + 1):
+            contador += consumo_mensual
+            Lectura.objects.create(
+                asignacion=self.asignacion, fecha=date(2026, mes, 1), lectura_bn=contador, lectura_color=0,
+                origen="manual",
+            )
+        return contador
+
+    def test_consumo_dentro_de_lo_normal_no_marca_alerta(self):
+        ultimo = self._historial_estable()
+        lectura = Lectura.objects.create(
+            asignacion=self.asignacion, fecha=date(2026, 7, 1), lectura_bn=ultimo + 1200, lectura_color=0,
+            origen="manual",
+        )
+
+        self.assertEqual(lectura.estado_auditoria, Lectura.EstadoAuditoria.OK)
+        self.assertEqual(lectura.detalle_auditoria, {})
+
+    def test_consumo_muy_por_encima_del_promedio_marca_alerta(self):
+        ultimo = self._historial_estable()
+        lectura = Lectura.objects.create(
+            asignacion=self.asignacion, fecha=date(2026, 7, 1), lectura_bn=ultimo + 10000, lectura_color=0,
+            origen="manual",
+        )
+
+        self.assertEqual(lectura.estado_auditoria, Lectura.EstadoAuditoria.ALERTA)
+        advertencias = lectura.detalle_auditoria["advertencias"]
+        self.assertEqual(len(advertencias), 1)
+        self.assertEqual(advertencias[0]["categoria"], "bn")
+
+    def test_primera_lectura_de_la_asignacion_no_marca_alerta_aunque_sea_grande(self):
+        lectura = Lectura.objects.create(
+            asignacion=self.asignacion, fecha=date(2026, 1, 1), lectura_bn=999999, lectura_color=0,
+            origen="manual",
+        )
+
+        self.assertEqual(lectura.estado_auditoria, Lectura.EstadoAuditoria.OK)
+
+    def test_sin_historial_suficiente_no_marca_alerta(self):
+        Lectura.objects.create(
+            asignacion=self.asignacion, fecha=date(2026, 1, 1), lectura_bn=1000, lectura_color=0, origen="manual",
+        )
+        # Solo una lectura previa: promedio_historico_mensual exige al menos 2
+        # para establecer una base confiable.
+        lectura = Lectura.objects.create(
+            asignacion=self.asignacion, fecha=date(2026, 2, 1), lectura_bn=999999, lectura_color=0,
+            origen="manual",
+        )
+
+        self.assertEqual(lectura.estado_auditoria, Lectura.EstadoAuditoria.OK)
+
+    def test_lectura_invertida_sin_rollover_no_se_evalua_como_anomalia(self):
+        # Ya se marca por otro motivo (candado a, ver auditoria/motor.py);
+        # detectar_anomalias no debe pisar ni duplicar esa evaluación.
+        self._historial_estable()
+        lectura = Lectura.objects.create(
+            asignacion=self.asignacion, fecha=date(2026, 7, 1), lectura_bn=100, lectura_color=0, origen="manual",
+        )
+
+        self.assertEqual(lectura.estado_auditoria, Lectura.EstadoAuditoria.OK)
+
+
+class AdvertenciasDeAuditoriaTestCase(TestCase):
+    def test_convierte_alertas_no_bloqueantes_a_dicts_serializables(self):
+        resultado = ResultadoAuditoria(contrato_id=1, fecha_inicio=date(2026, 1, 1), fecha_fin=date(2026, 1, 31))
+        resultado.alertas.append(
+            AlertaAuditoria(
+                candado="f",
+                equipo_numero_serie="SN-1",
+                bloqueante=False,
+                mensaje="Consumo BN (5000) supera 3.5x el promedio histórico (1000.0).",
+                datos={"consumo": 5000, "promedio_historico": 1000.0},
+            )
+        )
+
+        self.assertEqual(
+            _advertencias_de(resultado),
+            [
+                {
+                    "candado": "f",
+                    "equipo": "SN-1",
+                    "mensaje": "Consumo BN (5000) supera 3.5x el promedio histórico (1000.0).",
+                    "datos": {"consumo": 5000, "promedio_historico": 1000.0},
+                }
+            ],
+        )
+
+
+class AdvertenciasConsumoRecientesTestCase(TestCase):
+    def _contrato(self, numero):
+        return Contrato.objects.create(
+            numero_contrato=numero,
+            cliente=Cliente.objects.create(nombre=f"Cliente {numero}"),
+            renta_base=Decimal("1000.00"),
+            costo_excedente_bn=Decimal("0.50"),
+            costo_excedente_color=Decimal("1.50"),
+            dia_corte_facturacion=1,
+            fecha_inicio=date(2026, 1, 1),
+        )
+
+    def test_incluye_advertencias_de_facturas_aprobadas(self):
+        contrato = self._contrato("CT-ADV-1")
+        LogEjecucion.objects.create(
+            contrato=contrato,
+            estado=LogEjecucion.Estado.OK,
+            detalle={
+                "fase": "completo",
+                "factura_id": 1,
+                "advertencias": [
+                    {"candado": "f", "equipo": "SN-1", "mensaje": "Consumo BN fuera de lo normal.", "datos": {}}
+                ],
+            },
+        )
+
+        filas = _advertencias_consumo_recientes()
+
+        self.assertEqual(len(filas), 1)
+        self.assertEqual(filas[0]["equipo"], "SN-1")
+        self.assertEqual(filas[0]["contrato"], contrato)
+        self.assertEqual(filas[0]["mensaje"], "Consumo BN fuera de lo normal.")
+
+    def test_ignora_logs_sin_advertencias(self):
+        contrato = self._contrato("CT-ADV-2")
+        LogEjecucion.objects.create(
+            contrato=contrato,
+            estado=LogEjecucion.Estado.OK,
+            detalle={"fase": "completo", "factura_id": 1},
+        )
+
+        self.assertEqual(_advertencias_consumo_recientes(), [])
+
+    def test_ignora_logs_que_no_estan_ok(self):
+        # Un LogEjecucion PENDIENTE ya se muestra aparte, como alerta
+        # bloqueante (ver dashboard._alertas_pendientes_activas); no debe
+        # duplicarse en el panel de advertencias no bloqueantes.
+        contrato = self._contrato("CT-ADV-3")
+        LogEjecucion.objects.create(
+            contrato=contrato,
+            estado=LogEjecucion.Estado.PENDIENTE,
+            detalle={"fase": "auditoria", "advertencias": [{"candado": "f", "equipo": "SN-2", "mensaje": "x", "datos": {}}]},
+        )
+
+        self.assertEqual(_advertencias_consumo_recientes(), [])

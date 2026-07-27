@@ -184,6 +184,20 @@ class Lectura(TimestampedModel):
         ]
         indexes = [models.Index(fields=["fecha", "estado_auditoria"])]
 
+    def save(self, *args, **kwargs):
+        # Import diferido: core.calculo_consumo importa de core.models, así
+        # que un import al nivel del módulo aquí crearía un ciclo.
+        from core.calculo_consumo import detectar_anomalias
+
+        anomalias = detectar_anomalias(self.asignacion, self)
+        if anomalias:
+            self.estado_auditoria = self.EstadoAuditoria.ALERTA
+            self.detalle_auditoria = {"advertencias": [a.to_dict() for a in anomalias]}
+        else:
+            self.estado_auditoria = self.EstadoAuditoria.OK
+            self.detalle_auditoria = {}
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.asignacion.equipo} @ {self.fecha}"
 
