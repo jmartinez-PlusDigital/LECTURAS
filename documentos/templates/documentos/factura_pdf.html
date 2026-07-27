@@ -123,6 +123,15 @@
         background: #f5f7f9;
     }
 
+    table.detalle tr.fila-total td {
+        border-top: 2px solid #1f3d5c;
+        border-bottom: none;
+        background: #fff;
+        font-weight: bold;
+        color: #1f3d5c;
+        padding-top: 7px;
+    }
+
     .resumen {
         display: flex;
         justify-content: flex-end;
@@ -130,7 +139,11 @@
 
     table.resumen-tabla {
         border-collapse: collapse;
-        min-width: 320px;
+        min-width: 380px;
+    }
+
+    table.resumen-tabla td.etiqueta {
+        white-space: nowrap;
     }
 
     table.resumen-tabla td {
@@ -233,17 +246,40 @@
         {% empty %}
         <tr><td colspan="10">Sin equipos con consumo registrado en este periodo.</td></tr>
         {% endfor %}
+        {% if equipos %}
+        <tr class="fila-total">
+            <td colspan="8" style="text-align:right;">Total consumo del periodo</td>
+            <td class="num separador">{{ total_consumo_bn }}</td>
+            <td class="num">{{ total_consumo_color }}</td>
+        </tr>
+        {% endif %}
     </tbody>
 </table>
 
 <div class="resumen">
     <table class="resumen-tabla">
         <tr>
-            <td class="etiqueta">Excedente BN ({{ consumo_excedente_bn }} copias)</td>
+            <td class="etiqueta">Consumo total BN</td>
+            <td class="valor">{{ total_consumo_bn }} copias</td>
+        </tr>
+        <tr>
+            <td class="etiqueta">Copias incluidas BN</td>
+            <td class="valor">{{ copias_incluidas_bn }} copias</td>
+        </tr>
+        <tr>
+            <td class="etiqueta">Excedente BN ({{ consumo_excedente_bn }} copias &times; {{ tarifa_excedente_bn }})</td>
             <td class="valor">{{ monto_excedente_bn }}</td>
         </tr>
         <tr>
-            <td class="etiqueta">Excedente Color ({{ consumo_excedente_color }} copias)</td>
+            <td class="etiqueta">Consumo total Color</td>
+            <td class="valor">{{ total_consumo_color }} copias</td>
+        </tr>
+        <tr>
+            <td class="etiqueta">Copias incluidas Color</td>
+            <td class="valor">{{ copias_incluidas_color }} copias</td>
+        </tr>
+        <tr>
+            <td class="etiqueta">Excedente Color ({{ consumo_excedente_color }} copias &times; {{ tarifa_excedente_color }})</td>
             <td class="valor">{{ monto_excedente_color }}</td>
         </tr>
         <tr>

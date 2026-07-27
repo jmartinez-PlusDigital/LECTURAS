@@ -1,13 +1,13 @@
 from io import BytesIO
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from core.models import Contrato, Equipo
 from facturacion import ResultadoFacturacion
 
-from .pdf import MESES_ES
+from .pdf import MESES_ES, SIMBOLO_MONEDA
 
 AZUL_OSCURO = "1F3D5C"
 GRIS_CLARO = "F5F7F9"
@@ -83,24 +83,42 @@ def generar_excel_factura(resultado: ResultadoFacturacion, contrato: Contrato) -
                 ws.cell(row=fila, column=col).fill = relleno_alterno
         fila += 1
 
+    total_consumo_bn = sum((c.consumo_bn for c in resultado.consumo_por_equipo), 0)
+    total_consumo_color = sum((c.consumo_color for c in resultado.consumo_por_equipo), 0)
+
     if not resultado.consumo_por_equipo:
         ws.cell(row=fila, column=1, value="Sin equipos con consumo registrado en este periodo.")
         fila += 1
+    else:
+        ws.cell(row=fila, column=1, value="Total consumo del periodo").font = Font(bold=True, color=AZUL_OSCURO)
+        ws.cell(row=fila, column=9, value=total_consumo_bn).font = Font(bold=True, color=AZUL_OSCURO)
+        ws.cell(row=fila, column=10, value=total_consumo_color).font = Font(bold=True, color=AZUL_OSCURO)
+        for col in range(1, 11):
+            ws.cell(row=fila, column=col).border = Border(top=Side(style="medium", color=AZUL_OSCURO))
+        fila += 1
 
     fila += 1  # renglón en blanco antes del resumen
+    simbolo_tarifa = SIMBOLO_MONEDA.get(resultado.moneda, resultado.moneda + " ")
+    formato_tarifa = f'"{simbolo_tarifa}"#,##0.0000'
     resumen = [
-        ("Excedente BN (copias)", resultado.consumo_excedente_bn),
-        ("Excedente Color (copias)", resultado.consumo_excedente_color),
-        ("Monto renta", float(resultado.monto_renta)),
-        ("Monto excedente", float(resultado.monto_excedente)),
-        (f"IVA ({contrato.iva_porcentaje}%)", float(resultado.monto_iva)),
-        ("Total", float(resultado.monto_total)),
+        ("Consumo total BN (copias)", total_consumo_bn, None),
+        ("Copias incluidas BN", contrato.copias_incluidas_bn, None),
+        ("Tarifa excedente BN (por copia)", float(contrato.costo_excedente_bn), formato_tarifa),
+        ("Excedente BN (copias)", resultado.consumo_excedente_bn, None),
+        ("Consumo total Color (copias)", total_consumo_color, None),
+        ("Copias incluidas Color", contrato.copias_incluidas_color, None),
+        ("Tarifa excedente Color (por copia)", float(contrato.costo_excedente_color), formato_tarifa),
+        ("Excedente Color (copias)", resultado.consumo_excedente_color, None),
+        ("Monto renta", float(resultado.monto_renta), formato_moneda),
+        ("Monto excedente", float(resultado.monto_excedente), formato_moneda),
+        (f"IVA ({contrato.iva_porcentaje}%)", float(resultado.monto_iva), formato_moneda),
+        ("Total", float(resultado.monto_total), formato_moneda),
     ]
-    for etiqueta, valor in resumen:
+    for etiqueta, valor, formato in resumen:
         ws.cell(row=fila, column=1, value=etiqueta).font = fuente_etiqueta
         celda_valor = ws.cell(row=fila, column=2, value=valor)
-        if isinstance(valor, float):
-            celda_valor.number_format = formato_moneda
+        if formato:
+            celda_valor.number_format = formato
         if etiqueta == "Total":
             ws.cell(row=fila, column=1).font = Font(bold=True, size=12, color=AZUL_OSCURO)
             celda_valor.font = Font(bold=True, size=12, color=AZUL_OSCURO)

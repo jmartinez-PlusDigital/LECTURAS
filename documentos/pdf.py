@@ -22,6 +22,14 @@ def _moneda(valor: Decimal, moneda: str = "MXN") -> str:
     return f"{simbolo}{valor:,.2f}"
 
 
+def _tarifa(valor: Decimal, moneda: str = "MXN") -> str:
+    """Tarifa por copia: a diferencia de los montos (2 decimales), se muestra
+    con 4 —el costo_excedente del contrato se captura con esa precisión— para
+    que la multiplicación (copias × tarifa) le cuadre exacto al cliente."""
+    simbolo = SIMBOLO_MONEDA.get(moneda, f"{moneda} ")
+    return f"{simbolo}{valor:,.4f}"
+
+
 def generar_pdf_factura(resultado: ResultadoFacturacion, contrato: Contrato) -> bytes:
     """Genera el PDF de factura (horizontal) a partir de un ResultadoFacturacion.
 
@@ -50,6 +58,8 @@ def generar_pdf_factura(resultado: ResultadoFacturacion, contrato: Contrato) -> 
 
     monto_excedente_bn = Decimal(resultado.consumo_excedente_bn) * contrato.costo_excedente_bn
     monto_excedente_color = Decimal(resultado.consumo_excedente_color) * contrato.costo_excedente_color
+    total_consumo_bn = sum((c.consumo_bn for c in resultado.consumo_por_equipo), 0)
+    total_consumo_color = sum((c.consumo_color for c in resultado.consumo_por_equipo), 0)
 
     contexto = {
         "empresa_nombre": settings.EMPRESA_NOMBRE,
@@ -62,6 +72,12 @@ def generar_pdf_factura(resultado: ResultadoFacturacion, contrato: Contrato) -> 
         "fecha_generacion": timezone.localtime().strftime("%d/%m/%Y %H:%M"),
         "equipos": equipos,
         "moneda": resultado.moneda,
+        "total_consumo_bn": total_consumo_bn,
+        "total_consumo_color": total_consumo_color,
+        "copias_incluidas_bn": contrato.copias_incluidas_bn,
+        "copias_incluidas_color": contrato.copias_incluidas_color,
+        "tarifa_excedente_bn": _tarifa(contrato.costo_excedente_bn, resultado.moneda),
+        "tarifa_excedente_color": _tarifa(contrato.costo_excedente_color, resultado.moneda),
         "consumo_excedente_bn": resultado.consumo_excedente_bn,
         "consumo_excedente_color": resultado.consumo_excedente_color,
         "monto_excedente_bn": _moneda(monto_excedente_bn, resultado.moneda),
