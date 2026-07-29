@@ -1,8 +1,8 @@
 {% extends "admin/change_list.html" %}
 
 {% block object-tools-items %}
-    <li>
-        <a href="{% url 'admin:core_lectura_importar' %}" class="button">Importar lecturas</a>
-    </li>
+    <a href="{% url 'admin:core_lectura_importar' %}" class="btn btn-outline-secondary pd-btn-import">
+        <i class="fas fa-file-import"></i> Importar lecturas
+    </a>
     {{ block.super }}
 {% endblock %}

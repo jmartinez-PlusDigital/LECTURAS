@@ -157,6 +157,43 @@ class AuditoriaTestCase(TestCase):
         self.assertEqual(len(alertas_g), 1)
         self.assertFalse(resultado.aprobado)
 
+    def test_falla_sincronizacion_por_estatus_offline_de_3manager_es_inmediata(self):
+        # Aunque la lectura sea reciente (dentro de la ventana normal), si
+        # 3-Manager reporta el equipo offline en este momento, debe bloquear
+        # igual — no hay que esperar a que se acumulen días sin lectura.
+        equipo = self._equipo(
+            "SN-OFFLINE-1", metodo_lectura="api_3manager", id_externo_3manager="DEV-2", en_linea_api=False
+        )
+        asignacion = self._asignacion(equipo)
+        Lectura.objects.create(
+            asignacion=asignacion, fecha=date(2026, 1, 31), lectura_bn=100, lectura_color=0, origen="api_3manager"
+        )
+
+        resultado = auditar_contrato(
+            self.contrato, date(2026, 1, 1), date(2026, 1, 31), dias_falla_sincronizacion=5
+        )
+
+        alertas_g = [a for a in resultado.alertas if a.candado == "g" and a.equipo_numero_serie == "SN-OFFLINE-1"]
+        self.assertEqual(len(alertas_g), 1)
+        self.assertIn("offline", alertas_g[0].mensaje)
+        self.assertFalse(resultado.aprobado)
+
+    def test_equipo_en_linea_con_lectura_reciente_no_genera_alerta_g(self):
+        equipo = self._equipo(
+            "SN-ENLINEA-1", metodo_lectura="api_3manager", id_externo_3manager="DEV-3", en_linea_api=True
+        )
+        asignacion = self._asignacion(equipo)
+        Lectura.objects.create(
+            asignacion=asignacion, fecha=date(2026, 1, 31), lectura_bn=100, lectura_color=0, origen="api_3manager"
+        )
+
+        resultado = auditar_contrato(
+            self.contrato, date(2026, 1, 1), date(2026, 1, 31), dias_falla_sincronizacion=5
+        )
+
+        alertas_g = [a for a in resultado.alertas if a.candado == "g" and a.equipo_numero_serie == "SN-ENLINEA-1"]
+        self.assertEqual(len(alertas_g), 0)
+
     # --- (f) Anomalía estadística (no bloqueante) ---------------------------
 
     def test_anomalia_estadistica_no_bloqueante(self):

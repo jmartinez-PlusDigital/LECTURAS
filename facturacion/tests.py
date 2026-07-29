@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from django.test import TestCase, override_settings
 
-from core.models import Asignacion, Cliente, Contrato, Equipo, Factura, Lectura
+from core.models import Asignacion, Cliente, Contrato, EmpresaEmisora, Equipo, Factura, Lectura
 from facturacion import calcular_factura, persistir_factura
 
 
@@ -182,3 +182,44 @@ class FacturacionTestCase(TestCase):
 
         factura = persistir_factura(resultado)
         self.assertEqual(factura.moneda, "USD")
+
+    def test_emisor_ausente_no_revienta_el_calculo(self):
+        # self.contrato no tiene emisor asignado (contratos anteriores a esta
+        # función quedan así) — debe calcular igual, sin emisor.
+        equipo = self._equipo("SN-FAC-9")
+        asignacion = self._asignacion(equipo)
+        Lectura.objects.create(
+            asignacion=asignacion, fecha=date(2026, 1, 31), lectura_bn=500, lectura_color=50, origen="manual"
+        )
+
+        resultado = calcular_factura(self.contrato, date(2026, 1, 1), date(2026, 1, 31), 1, 2026)
+
+        self.assertIsNone(resultado.emisor)
+        factura = persistir_factura(resultado)
+        self.assertIsNone(factura.emisor)
+
+    def test_emisor_del_contrato_se_propaga_a_la_factura_persistida(self):
+        emisor = EmpresaEmisora.objects.create(nombre="Mexicali Plus Digital Test")
+        contrato_con_emisor = Contrato.objects.create(
+            numero_contrato="CT-FAC-EMISOR",
+            cliente=self.cliente,
+            emisor=emisor,
+            renta_base=Decimal("500.00"),
+            copias_incluidas_bn=1000,
+            copias_incluidas_color=200,
+            costo_excedente_bn=Decimal("0.50"),
+            costo_excedente_color=Decimal("1.50"),
+            dia_corte_facturacion=1,
+            fecha_inicio=date(2026, 1, 1),
+        )
+        equipo = self._equipo("SN-FAC-10")
+        asignacion = self._asignacion(equipo, contrato=contrato_con_emisor)
+        Lectura.objects.create(
+            asignacion=asignacion, fecha=date(2026, 1, 31), lectura_bn=500, lectura_color=50, origen="manual"
+        )
+
+        resultado = calcular_factura(contrato_con_emisor, date(2026, 1, 1), date(2026, 1, 31), 1, 2026)
+        self.assertEqual(resultado.emisor, emisor)
+
+        factura = persistir_factura(resultado)
+        self.assertEqual(factura.emisor, emisor)

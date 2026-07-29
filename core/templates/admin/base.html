@@ -329,7 +329,7 @@
                             {% endif %}
                             {% endif %}
 
-                            {% if perms.core.view_cliente or perms.core.view_equipo or perms.core.view_asignacion %}
+                            {% if perms.core.view_cliente or perms.core.view_equipo or perms.core.view_asignacion or perms.core.view_empresaemisora %}
                             <li class="nav-header">{% trans 'Catálogo' %}</li>
                             {% if perms.core.view_cliente %}
                             <li class="nav-item"><a href="{% url 'admin:core_cliente_changelist' %}" class="nav-link"><i class="nav-icon fas fa-building"></i><p>{% trans 'Clientes' %}</p></a></li>
@@ -339,6 +339,9 @@
                             {% endif %}
                             {% if perms.core.view_asignacion %}
                             <li class="nav-item"><a href="{% url 'admin:core_asignacion_changelist' %}" class="nav-link"><i class="nav-icon fas fa-link"></i><p>{% trans 'Asignaciones' %}</p></a></li>
+                            {% endif %}
+                            {% if perms.core.view_empresaemisora %}
+                            <li class="nav-item"><a href="{% url 'admin:core_empresaemisora_changelist' %}" class="nav-link"><i class="nav-icon fas fa-stamp"></i><p>{% trans 'Empresas emisoras' %}</p></a></li>
                             {% endif %}
                             {% endif %}
 

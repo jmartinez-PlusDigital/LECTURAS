@@ -50,6 +50,23 @@ class Cliente(TimestampedModel):
         return self.nombre
 
 
+class EmpresaEmisora(TimestampedModel):
+    """Razón social que emite la factura (Plus Digital factura bajo más de
+    una). Define el nombre y logo que aparecen en el PDF/Excel — ver
+    Contrato.emisor y Factura.emisor."""
+
+    nombre = models.CharField(max_length=255, unique=True)
+    logo = models.ImageField(upload_to="emisores/", blank=True)
+
+    class Meta:
+        ordering = ["nombre"]
+        verbose_name = "Empresa emisora"
+        verbose_name_plural = "Empresas emisoras"
+
+    def __str__(self):
+        return self.nombre
+
+
 class Contrato(TimestampedModel):
     class Estado(models.TextChoices):
         ACTIVO = "activo", "Activo"
@@ -58,6 +75,17 @@ class Contrato(TimestampedModel):
 
     numero_contrato = models.CharField(max_length=50, unique=True)
     cliente = models.ForeignKey(Cliente, on_delete=models.PROTECT, related_name="contratos")
+    emisor = models.ForeignKey(
+        EmpresaEmisora,
+        on_delete=models.PROTECT,
+        related_name="contratos",
+        null=True,
+        blank=False,
+        help_text=(
+            "Razón social que factura este contrato (define el logo/nombre del PDF y Excel). "
+            "Nulo solo en contratos creados antes de esta función; el Admin lo exige de aquí en adelante."
+        ),
+    )
     moneda = models.CharField(max_length=3, choices=Moneda.choices, default=Moneda.MXN)
     renta_base = models.DecimalField(max_digits=10, decimal_places=2)
     copias_incluidas_bn = models.PositiveIntegerField(default=0)
@@ -104,6 +132,19 @@ class Equipo(TimestampedModel):
     tope_contador = models.PositiveIntegerField(null=True, blank=True)
     estado_actual = models.CharField(
         max_length=20, choices=EstadoActual.choices, default=EstadoActual.SIN_ASIGNAR
+    )
+    en_linea_api = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Estatus de conectividad reportado por la fuente de lectura (p. ej. isOffline de 3-Manager). "
+            "Nulo para equipos de lectura manual o que aún no se han sincronizado."
+        ),
+    )
+    ultima_actualizacion_api = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Última vez que el equipo reportó datos a su fuente de lectura (ver sincronizar_lecturas).",
     )
 
     class Meta:
@@ -213,6 +254,14 @@ class Factura(TimestampedModel):
         ERROR_ARCHIVO = "error_archivo", "Error de archivo"
 
     contrato = models.ForeignKey(Contrato, on_delete=models.PROTECT, related_name="facturas")
+    emisor = models.ForeignKey(
+        EmpresaEmisora,
+        on_delete=models.PROTECT,
+        related_name="facturas",
+        null=True,
+        blank=True,
+        help_text="Copiado del contrato al momento de facturar, para que quede fijo aunque el contrato cambie de emisor después.",
+    )
     periodo_mes = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(12)]
     )

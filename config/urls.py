@@ -19,7 +19,12 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import path
 
-from core.admin import busqueda_global_view, dashboard_view, facturar_uno_ahora_view
+from core.admin import (
+    busqueda_global_view,
+    dashboard_view,
+    facturar_uno_ahora_view,
+    sincronizar_lecturas_ahora_view,
+)
 
 urlpatterns = [
     # Se registran ANTES de admin.site.urls: el panel de inicio propio de
@@ -30,6 +35,11 @@ urlpatterns = [
         'admin/contratos/<int:contrato_id>/facturar-ahora/',
         admin.site.admin_view(facturar_uno_ahora_view),
         name='dashboard-facturar-ahora',
+    ),
+    path(
+        'admin/sincronizar-lecturas/',
+        admin.site.admin_view(sincronizar_lecturas_ahora_view),
+        name='dashboard-sincronizar-lecturas',
     ),
     path('admin/buscar/', admin.site.admin_view(busqueda_global_view), name='dashboard-busqueda'),
     path('admin/', admin.site.urls),

@@ -27,3 +27,26 @@ document.addEventListener("submit", function (evento) {
         boton.textContent = textoCarga;
     }
 });
+
+/* Barra de acciones masivas del listado (ver admin/actions.html): oculta
+ * hasta que se seleccione al menos una fila, y con un texto real en vez del
+ * "---------" que pone Django por defecto en el select de acciones. */
+document.addEventListener("DOMContentLoaded", function () {
+    var acciones = document.getElementById("pd-actions");
+    if (!acciones) return;
+
+    var opcionVacia = acciones.querySelector('select[name="action"] option[value=""]');
+    if (opcionVacia) opcionVacia.textContent = "Elige una acción…";
+
+    function actualizarVisibilidad() {
+        var hayMarcados = document.querySelectorAll('input[name="_selected_action"]:checked').length > 0;
+        acciones.classList.toggle("pd-actions-visible", hayMarcados);
+    }
+
+    document.addEventListener("change", function (evento) {
+        if (evento.target.name === "_selected_action" || evento.target.id === "action-toggle") {
+            actualizarVisibilidad();
+        }
+    });
+    actualizarVisibilidad();
+});

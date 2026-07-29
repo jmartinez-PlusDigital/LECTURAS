@@ -2,12 +2,16 @@ import io
 from datetime import date
 from decimal import Decimal
 
-from django.test import TestCase
+from django.contrib.auth import get_user_model
+from django.test import Client, TestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from auditoria.tipos import AlertaAuditoria, ResultadoAuditoria
 from core.dashboard import (
     _advertencias_consumo_recientes,
+    _contratos_lectura_desactualizada,
+    _equipos_offline_3manager,
     _facturado_mes_por_moneda,
     _ultimos_n_meses,
     excedente_mensual,
@@ -16,6 +20,7 @@ from core.dashboard import (
 from core.historial_lecturas import historial_de_contrato
 from core.importacion_clientes import procesar_archivo_clientes
 from core.importacion_contratos import procesar_archivo_contratos
+from core.importacion_equipos import asignar_equipo_a_contrato
 from core.importacion_lecturas import generar_plantilla_lecturas, procesar_archivo_lecturas
 from core.models import Asignacion, Cliente, Contrato, Equipo, Factura, Lectura, LogEjecucion
 from core.procesamiento_facturacion import _advertencias_de, _calcular_periodo
@@ -726,3 +731,420 @@ class AdvertenciasConsumoRecientesTestCase(TestCase):
         )
 
         self.assertEqual(_advertencias_consumo_recientes(), [])
+
+
+class AsignarEquipoAContratoTestCase(TestCase):
+    """`asignar_equipo_a_contrato` es pública y compartida entre el
+    importador CSV y la acción masiva del Admin (ver EquipoAdmin en
+    core/admin.py) — se prueba directo aquí, sin depender de ninguno de los
+    dos caminos que la llaman."""
+
+    def setUp(self):
+        self.cliente = Cliente.objects.create(nombre="Cliente Asignar Test")
+        self.contrato = Contrato.objects.create(
+            numero_contrato="CT-ASIG-1",
+            cliente=self.cliente,
+            renta_base=Decimal("1000.00"),
+            costo_excedente_bn=Decimal("0.50"),
+            costo_excedente_color=Decimal("1.50"),
+            dia_corte_facturacion=1,
+            fecha_inicio=date(2026, 1, 1),
+        )
+        self.equipo = Equipo.objects.create(
+            numero_serie="SN-ASIG-1", marca="Canon", modelo="X1", metodo_lectura="manual"
+        )
+
+    def test_crea_la_asignacion_y_activa_el_equipo(self):
+        detalle = asignar_equipo_a_contrato(
+            self.equipo,
+            self.contrato.numero_contrato,
+            {"fecha_inicio_asignacion": "2026-02-01", "lectura_inicial_bn": 0, "lectura_inicial_color": 0},
+        )
+
+        self.assertIn("creada", detalle)
+        asignacion = Asignacion.objects.get(equipo=self.equipo)
+        self.assertEqual(asignacion.contrato, self.contrato)
+        self.assertEqual(asignacion.fecha_inicio, date(2026, 2, 1))
+        self.equipo.refresh_from_db()
+        self.assertEqual(self.equipo.estado_actual, Equipo.EstadoActual.ACTIVO)
+
+    def test_equipo_ya_asignado_a_otro_contrato_es_error(self):
+        otro_contrato = Contrato.objects.create(
+            numero_contrato="CT-ASIG-2",
+            cliente=self.cliente,
+            renta_base=Decimal("1000.00"),
+            costo_excedente_bn=Decimal("0.50"),
+            costo_excedente_color=Decimal("1.50"),
+            dia_corte_facturacion=1,
+            fecha_inicio=date(2026, 1, 1),
+        )
+        Asignacion.objects.create(
+            equipo=self.equipo,
+            contrato=otro_contrato,
+            fecha_inicio=date(2026, 1, 1),
+            lectura_inicial_referencia_bn=0,
+            lectura_inicial_referencia_color=0,
+        )
+
+        with self.assertRaises(ValueError):
+            asignar_equipo_a_contrato(
+                self.equipo,
+                self.contrato.numero_contrato,
+                {"fecha_inicio_asignacion": "2026-02-01", "lectura_inicial_bn": 0, "lectura_inicial_color": 0},
+            )
+
+    def test_equipo_ya_asignado_al_mismo_contrato_no_duplica(self):
+        Asignacion.objects.create(
+            equipo=self.equipo,
+            contrato=self.contrato,
+            fecha_inicio=date(2026, 1, 1),
+            lectura_inicial_referencia_bn=0,
+            lectura_inicial_referencia_color=0,
+        )
+
+        detalle = asignar_equipo_a_contrato(
+            self.equipo,
+            self.contrato.numero_contrato,
+            {"fecha_inicio_asignacion": "2026-02-01", "lectura_inicial_bn": 0, "lectura_inicial_color": 0},
+        )
+
+        self.assertIn("ya estaba asignado", detalle)
+        self.assertEqual(Asignacion.objects.filter(equipo=self.equipo).count(), 1)
+
+
+class AsignarMasivoViewTestCase(TestCase):
+    """Vista del Admin detrás de la acción "Asignar equipos seleccionados a
+    un contrato" del listado de Equipos (ver EquipoAdmin.asignar_masivo_view)."""
+
+    def setUp(self):
+        self.admin_user = get_user_model().objects.create_superuser(
+            username="admin-asignar-test", email="admin@test.com", password="clave-segura-123"
+        )
+        self.client = Client()
+        self.client.force_login(self.admin_user)
+
+        self.cliente = Cliente.objects.create(nombre="Cliente Asignar Masivo Test")
+        self.contrato = Contrato.objects.create(
+            numero_contrato="CT-MASIVO-1",
+            cliente=self.cliente,
+            estado=Contrato.Estado.ACTIVO,
+            renta_base=Decimal("1000.00"),
+            costo_excedente_bn=Decimal("0.50"),
+            costo_excedente_color=Decimal("1.50"),
+            dia_corte_facturacion=1,
+            fecha_inicio=date(2026, 1, 1),
+        )
+        self.equipo1 = Equipo.objects.create(
+            numero_serie="SN-MASIVO-1", marca="Canon", modelo="X1", metodo_lectura="manual"
+        )
+        self.equipo2 = Equipo.objects.create(
+            numero_serie="SN-MASIVO-2", marca="Canon", modelo="X2", metodo_lectura="manual"
+        )
+
+    def test_post_asigna_todos_los_equipos_seleccionados(self):
+        url = reverse("admin:core_equipo_asignar_masivo")
+        respuesta = self.client.post(
+            url,
+            {
+                "ids": f"{self.equipo1.pk},{self.equipo2.pk}",
+                "contrato": self.contrato.pk,
+                "fecha_inicio": "2026-02-01",
+                f"lectura_bn_{self.equipo1.pk}": 100,
+                f"lectura_color_{self.equipo1.pk}": 0,
+                f"lectura_bn_{self.equipo2.pk}": 200,
+                f"lectura_color_{self.equipo2.pk}": 50,
+            },
+        )
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(Asignacion.objects.filter(contrato=self.contrato).count(), 2)
+        asignacion1 = Asignacion.objects.get(equipo=self.equipo1)
+        self.assertEqual(asignacion1.lectura_inicial_referencia_bn, 100)
+        asignacion2 = Asignacion.objects.get(equipo=self.equipo2)
+        self.assertEqual(asignacion2.lectura_inicial_referencia_color, 50)
+
+    def test_equipos_ya_asignados_se_omiten_de_la_pantalla(self):
+        Asignacion.objects.create(
+            equipo=self.equipo1,
+            contrato=self.contrato,
+            fecha_inicio=date(2026, 1, 1),
+            lectura_inicial_referencia_bn=0,
+            lectura_inicial_referencia_color=0,
+        )
+        url = reverse("admin:core_equipo_asignar_masivo") + f"?ids={self.equipo1.pk},{self.equipo2.pk}"
+
+        respuesta = self.client.get(url)
+
+        self.assertEqual(respuesta.status_code, 200)
+        equipos_en_formulario = [fila[0] for fila in respuesta.context["filas_formulario"]]
+        self.assertEqual(equipos_en_formulario, [self.equipo2])
+
+    def test_sin_ids_redirige_al_listado(self):
+        url = reverse("admin:core_equipo_asignar_masivo")
+
+        respuesta = self.client.get(url)
+
+        self.assertRedirects(respuesta, reverse("admin:core_equipo_changelist"))
+
+
+class EquiposOffline3ManagerTestCase(TestCase):
+    def setUp(self):
+        self.cliente = Cliente.objects.create(nombre="Cliente Offline Test")
+        self.contrato = Contrato.objects.create(
+            numero_contrato="CT-OFFLINE-1",
+            cliente=self.cliente,
+            renta_base=Decimal("1000.00"),
+            costo_excedente_bn=Decimal("0.50"),
+            costo_excedente_color=Decimal("1.50"),
+            dia_corte_facturacion=1,
+            fecha_inicio=date(2026, 1, 1),
+        )
+
+    def test_incluye_equipos_3manager_offline_con_su_contrato_activo(self):
+        equipo = Equipo.objects.create(
+            numero_serie="SN-DASH-OFFLINE-1",
+            marca="Ricoh",
+            modelo="IM 550",
+            metodo_lectura="api_3manager",
+            en_linea_api=False,
+        )
+        Asignacion.objects.create(
+            equipo=equipo,
+            contrato=self.contrato,
+            fecha_inicio=date(2026, 1, 1),
+            lectura_inicial_referencia_bn=0,
+            lectura_inicial_referencia_color=0,
+        )
+
+        equipos = _equipos_offline_3manager()
+
+        self.assertEqual(len(equipos), 1)
+        self.assertEqual(equipos[0].numero_serie, "SN-DASH-OFFLINE-1")
+        self.assertEqual(equipos[0].contrato_activo, self.contrato)
+
+    def test_no_incluye_equipos_en_linea_ni_manuales(self):
+        Equipo.objects.create(
+            numero_serie="SN-DASH-ONLINE",
+            marca="Canon",
+            modelo="X1",
+            metodo_lectura="api_3manager",
+            en_linea_api=True,
+        )
+        Equipo.objects.create(
+            numero_serie="SN-DASH-MANUAL", marca="Canon", modelo="X2", metodo_lectura="manual"
+        )
+
+        self.assertEqual(_equipos_offline_3manager(), [])
+
+    def test_no_incluye_equipos_dados_de_baja(self):
+        Equipo.objects.create(
+            numero_serie="SN-DASH-BAJA",
+            marca="Canon",
+            modelo="X3",
+            metodo_lectura="api_3manager",
+            en_linea_api=False,
+            estado_actual=Equipo.EstadoActual.BAJA,
+        )
+
+        self.assertEqual(_equipos_offline_3manager(), [])
+
+
+class SincronizarLecturasEstatusApiTestCase(TestCase):
+    """La parte nueva de sincronizar_lecturas: además de crear la Lectura,
+    persiste en_linea_api/ultima_actualizacion_api en el Equipo cuando la
+    fuente los reporta (ver integrations.LecturaExterna)."""
+
+    def setUp(self):
+        self.cliente = Cliente.objects.create(nombre="Cliente Sync Estatus Test")
+        self.contrato = Contrato.objects.create(
+            numero_contrato="CT-SYNC-1",
+            cliente=self.cliente,
+            renta_base=Decimal("1000.00"),
+            costo_excedente_bn=Decimal("0.50"),
+            costo_excedente_color=Decimal("1.50"),
+            dia_corte_facturacion=1,
+            fecha_inicio=date(2026, 1, 1),
+        )
+        self.equipo = Equipo.objects.create(
+            numero_serie="SN-SYNC-1",
+            marca="Ricoh",
+            modelo="IM 550",
+            metodo_lectura="api_3manager",
+            id_externo_3manager="DEV-SYNC-1",
+        )
+        Asignacion.objects.create(
+            equipo=self.equipo,
+            contrato=self.contrato,
+            fecha_inicio=date(2026, 1, 1),
+            lectura_inicial_referencia_bn=0,
+            lectura_inicial_referencia_color=0,
+        )
+
+    def test_actualiza_estatus_del_equipo_al_sincronizar(self):
+        from unittest.mock import Mock, patch
+
+        from django.core.management import call_command
+
+        from integrations import LecturaExterna
+
+        lectura_externa = LecturaExterna(
+            id_externo="DEV-SYNC-1",
+            lectura_bn=500,
+            lectura_color=0,
+            fecha=timezone.localdate(),
+            en_linea=False,
+            ultima_actualizacion=timezone.now(),
+        )
+        cliente_falso = Mock()
+        cliente_falso.obtener_lecturas.return_value = {"DEV-SYNC-1": lectura_externa}
+
+        with patch(
+            "core.sincronizacion_lecturas.get_client",
+            side_effect=lambda metodo: cliente_falso if metodo == "api_3manager" else Mock(obtener_lecturas=Mock(return_value={})),
+        ):
+            call_command("sincronizar_lecturas")
+
+        self.equipo.refresh_from_db()
+        self.assertFalse(self.equipo.en_linea_api)
+        self.assertIsNotNone(self.equipo.ultima_actualizacion_api)
+
+    def test_fuente_sin_equipos_no_tumba_el_estado_aunque_no_este_configurada(self):
+        """Regresión: con 0 equipos api_printaudit en el sistema, esa fuente
+        sin configurar (API_PRINTAUDIT_BASE_URL/API_KEY vacíos) marcaba
+        error_fuente y el ciclo completo quedaba en estado Error, aunque
+        3-Manager sí hubiera sincronizado bien y nada dependiera de PrintAudit."""
+        from unittest.mock import Mock, patch
+
+        from integrations import LecturaExterna
+        from core.sincronizacion_lecturas import sincronizar_lecturas
+
+        lectura_externa = LecturaExterna(
+            id_externo="DEV-SYNC-1", lectura_bn=500, lectura_color=0, fecha=timezone.localdate()
+        )
+        cliente_falso = Mock()
+        cliente_falso.obtener_lecturas.return_value = {"DEV-SYNC-1": lectura_externa}
+
+        with patch("core.sincronizacion_lecturas.get_client", return_value=cliente_falso):
+            log = sincronizar_lecturas()
+
+        self.assertEqual(log.estado, LogEjecucion.Estado.OK)
+        self.assertNotIn("error_fuente", log.detalle["fuentes"]["api_printaudit"])
+        self.assertEqual(log.detalle["fuentes"]["api_printaudit"]["equipos_evaluados"], 0)
+
+
+class SincronizarLecturasAhoraViewTestCase(TestCase):
+    """Botón "Sincronizar lecturas ahora" del dashboard (ver
+    sincronizar_lecturas_ahora_view en core/admin.py)."""
+
+    def setUp(self):
+        self.admin_user = get_user_model().objects.create_superuser(
+            username="admin-sync-test", email="admin-sync@test.com", password="clave-segura-123"
+        )
+        self.client = Client()
+        self.client.force_login(self.admin_user)
+
+    def test_post_corre_la_sincronizacion_y_redirige_al_dashboard(self):
+        from unittest.mock import Mock, patch
+
+        with patch("core.admin.sincronizar_lecturas") as mock_sincronizar:
+            mock_sincronizar.return_value = Mock(
+                estado=LogEjecucion.Estado.OK,
+                detalle={"fuentes": {"api_3manager": {"lecturas_creadas": 3, "lecturas_actualizadas": 1}}},
+            )
+            respuesta = self.client.post(reverse("dashboard-sincronizar-lecturas"))
+
+        mock_sincronizar.assert_called_once()
+        self.assertRedirects(respuesta, reverse("admin:index"))
+
+    def test_get_no_esta_permitido(self):
+        respuesta = self.client.get(reverse("dashboard-sincronizar-lecturas"))
+
+        self.assertEqual(respuesta.status_code, 403)
+
+
+class ContratosLecturaDesactualizadaTestCase(TestCase):
+    """Alerta temprana del dashboard: contratos donde ningún equipo activo
+    reportó lectura en `dias_alerta` días, sin importar qué tan lejos esté
+    su corte (ver core.dashboard._contratos_lectura_desactualizada)."""
+
+    def _contrato(self, numero):
+        return Contrato.objects.create(
+            numero_contrato=numero,
+            cliente=Cliente.objects.create(nombre=f"Cliente {numero}"),
+            renta_base=Decimal("1000.00"),
+            costo_excedente_bn=Decimal("0.50"),
+            costo_excedente_color=Decimal("1.50"),
+            dia_corte_facturacion=27,  # lejos de "hoy" en las pruebas, a propósito
+            fecha_inicio=date(2026, 1, 1),
+        )
+
+    def _asignacion_activa(self, contrato, serie):
+        equipo = Equipo.objects.create(numero_serie=serie, marca="Canon", modelo="X1", metodo_lectura="manual")
+        return Asignacion.objects.create(
+            equipo=equipo,
+            contrato=contrato,
+            fecha_inicio=date(2026, 1, 1),
+            lectura_inicial_referencia_bn=0,
+            lectura_inicial_referencia_color=0,
+        )
+
+    def test_contrato_sin_lectura_reciente_aparece_con_dias_correctos(self):
+        contrato = self._contrato("CT-DESACT-1")
+        asignacion = self._asignacion_activa(contrato, "SN-DESACT-1")
+        Lectura.objects.create(
+            asignacion=asignacion, fecha=date(2026, 7, 20), lectura_bn=100, lectura_color=0, origen="manual"
+        )
+
+        resultado = _contratos_lectura_desactualizada(date(2026, 7, 29), dias_alerta=3)
+
+        contratos_en_resultado = {r["contrato"].numero_contrato: r for r in resultado}
+        self.assertIn("CT-DESACT-1", contratos_en_resultado)
+        self.assertEqual(contratos_en_resultado["CT-DESACT-1"]["dias_sin_lectura"], 9)
+
+    def test_contrato_con_lectura_reciente_no_aparece(self):
+        contrato = self._contrato("CT-DESACT-2")
+        asignacion = self._asignacion_activa(contrato, "SN-DESACT-2")
+        Lectura.objects.create(
+            asignacion=asignacion, fecha=date(2026, 7, 28), lectura_bn=100, lectura_color=0, origen="manual"
+        )
+
+        resultado = _contratos_lectura_desactualizada(date(2026, 7, 29), dias_alerta=3)
+
+        self.assertNotIn("CT-DESACT-2", {r["contrato"].numero_contrato for r in resultado})
+
+    def test_contrato_sin_ninguna_lectura_aparece_como_nunca(self):
+        contrato = self._contrato("CT-DESACT-3")
+        self._asignacion_activa(contrato, "SN-DESACT-3")
+
+        resultado = _contratos_lectura_desactualizada(date(2026, 7, 29), dias_alerta=3)
+
+        contratos_en_resultado = {r["contrato"].numero_contrato: r for r in resultado}
+        self.assertIn("CT-DESACT-3", contratos_en_resultado)
+        self.assertIsNone(contratos_en_resultado["CT-DESACT-3"]["ultima_lectura_fecha"])
+        self.assertIsNone(contratos_en_resultado["CT-DESACT-3"]["dias_sin_lectura"])
+
+    def test_contrato_sin_equipos_activos_no_aparece(self):
+        # Un contrato sin ninguna asignación vigente no es un problema de
+        # conectividad — es otro escenario (candado c, equipo omitido).
+        self._contrato("CT-DESACT-4")
+
+        resultado = _contratos_lectura_desactualizada(date(2026, 7, 29), dias_alerta=3)
+
+        self.assertNotIn("CT-DESACT-4", {r["contrato"].numero_contrato for r in resultado})
+
+    def test_ordena_los_mas_desactualizados_primero(self):
+        contrato_a = self._contrato("CT-DESACT-5A")
+        asignacion_a = self._asignacion_activa(contrato_a, "SN-DESACT-5A")
+        Lectura.objects.create(
+            asignacion=asignacion_a, fecha=date(2026, 7, 10), lectura_bn=100, lectura_color=0, origen="manual"
+        )
+        contrato_b = self._contrato("CT-DESACT-5B")
+        asignacion_b = self._asignacion_activa(contrato_b, "SN-DESACT-5B")
+        Lectura.objects.create(
+            asignacion=asignacion_b, fecha=date(2026, 7, 24), lectura_bn=100, lectura_color=0, origen="manual"
+        )
+
+        resultado = _contratos_lectura_desactualizada(date(2026, 7, 29), dias_alerta=3)
+
+        numeros = [r["contrato"].numero_contrato for r in resultado]
+        self.assertLess(numeros.index("CT-DESACT-5A"), numeros.index("CT-DESACT-5B"))

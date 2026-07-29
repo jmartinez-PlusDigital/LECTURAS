@@ -5,6 +5,7 @@ from django import forms
 from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
 from django.db.models import Q
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -20,12 +21,13 @@ from core.importacion_clientes import procesar_archivo_clientes
 from core.importacion_clientes import resumen_de as resumen_de_clientes
 from core.importacion_contratos import procesar_archivo_contratos
 from core.importacion_contratos import resumen_de as resumen_de_contratos
-from core.importacion_equipos import procesar_archivo_equipos
+from core.importacion_equipos import asignar_equipo_a_contrato, procesar_archivo_equipos
 from core.importacion_equipos import resumen_de as resumen_de_equipos
 from core.importacion_lecturas import generar_plantilla_lecturas, procesar_archivo_lecturas
 from core.importacion_lecturas import resumen_de as resumen_de_lecturas
 from core.notificaciones import enviar_resumen_ejecucion
 from core.procesamiento_facturacion import generar_snapshot, procesar_contrato
+from core.sincronizacion_lecturas import sincronizar_lecturas
 from integrations.exceptions import IntegrationConnectionError
 from integrations.tresmanager import Cliente3Manager
 
@@ -33,6 +35,7 @@ from .models import (
     Asignacion,
     Cliente,
     Contrato,
+    EmpresaEmisora,
     Equipo,
     Factura,
     Lectura,
@@ -110,6 +113,18 @@ class ImportarClientesForm(forms.Form):
         if not archivo.name.lower().endswith((".csv", ".xlsx", ".xls")):
             raise ValidationError("El archivo debe ser .csv, .xlsx o .xls.")
         return archivo
+
+
+@admin.register(EmpresaEmisora)
+class EmpresaEmisoraAdmin(admin.ModelAdmin):
+    list_display = ("nombre", "logo_preview")
+    search_fields = ("nombre",)
+
+    @admin.display(description="Logo")
+    def logo_preview(self, obj):
+        if obj.logo:
+            return format_html('<img src="{}" style="height: 32px;">', obj.logo.url)
+        return "— (sube el logo en esta ficha)"
 
 
 @admin.register(Cliente)
@@ -305,6 +320,45 @@ def facturar_uno_ahora_view(request, contrato_id):
     return redirect("admin:index")
 
 
+def sincronizar_lecturas_ahora_view(request):
+    """Botón "Sincronizar lecturas ahora" del dashboard: corre bajo demanda
+    lo mismo que el job diario (ver core.sincronizacion_lecturas), para no
+    tener que esperar al cron/tarea programada (que hoy, de hecho, todavía
+    no existe) ni abrir una terminal."""
+    if request.method != "POST":
+        raise PermissionDenied
+    if not request.user.has_perm("core.change_equipo"):
+        raise PermissionDenied
+
+    log = sincronizar_lecturas()
+    totales = {"creadas": 0, "actualizadas": 0, "sin_respuesta": 0, "errores": 0}
+    for resumen_fuente in log.detalle.get("fuentes", {}).values():
+        totales["creadas"] += resumen_fuente.get("lecturas_creadas", 0)
+        totales["actualizadas"] += resumen_fuente.get("lecturas_actualizadas", 0)
+        totales["sin_respuesta"] += len(resumen_fuente.get("sin_respuesta_api", []))
+        totales["errores"] += len(resumen_fuente.get("errores_equipo", []))
+
+    resumen_texto = (
+        f"{totales['creadas']} lectura(s) creada(s), {totales['actualizadas']} actualizada(s)"
+    )
+    if log.estado == LogEjecucion.Estado.OK:
+        messages.success(request, f"Sincronización completada: {resumen_texto}.")
+    elif log.estado == LogEjecucion.Estado.PENDIENTE:
+        messages.warning(
+            request,
+            f"Sincronización completada con alertas ({resumen_texto}; "
+            f"{totales['sin_respuesta']} sin respuesta, {totales['errores']} con error) — "
+            "revisa el detalle en Sistema → Historial de ejecución.",
+        )
+    else:
+        messages.error(
+            request,
+            "Una o más fuentes fallaron por completo — revisa el detalle en "
+            "Sistema → Historial de ejecución.",
+        )
+    return redirect("admin:index")
+
+
 @admin.action(description="Facturación: descargar plantilla de lecturas")
 def descargar_plantilla_lecturas(modeladmin, request, queryset):
     contratos = list(queryset)
@@ -352,6 +406,7 @@ class ContratoAdmin(admin.ModelAdmin):
     list_display = (
         "numero_contrato",
         "cliente",
+        "emisor",
         "estado",
         "moneda",
         "renta_base",
@@ -361,7 +416,7 @@ class ContratoAdmin(admin.ModelAdmin):
         "enlace_historial",
         "enlace_equipos",
     )
-    list_filter = ("estado", "moneda")
+    list_filter = ("estado", "moneda", "emisor")
     search_fields = ("numero_contrato", "cliente__nombre")
     autocomplete_fields = ("cliente",)
     date_hierarchy = "fecha_inicio"
@@ -517,6 +572,33 @@ class ImportarLecturasForm(forms.Form):
         return archivo
 
 
+class AsignarEquiposForm(forms.Form):
+    contrato = forms.ModelChoiceField(
+        queryset=Contrato.objects.filter(estado=Contrato.Estado.ACTIVO).order_by("numero_contrato"),
+        label="Contrato destino",
+    )
+    fecha_inicio = forms.DateField(label="Fecha de inicio de la asignación")
+
+    def __init__(self, *args, equipos=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        # Un campo de lectura inicial por equipo: cada uno arranca su propia
+        # asignación con su propio punto de referencia, no puede compartirse
+        # un solo valor entre varios equipos.
+        for equipo in equipos:
+            self.fields[f"lectura_bn_{equipo.pk}"] = forms.IntegerField(
+                label="Lectura inicial BN", min_value=0, initial=0
+            )
+            self.fields[f"lectura_color_{equipo.pk}"] = forms.IntegerField(
+                label="Lectura inicial Color", min_value=0, initial=0
+            )
+
+
+@admin.action(description="Asignar equipos seleccionados a un contrato")
+def asignar_a_contrato_action(modeladmin, request, queryset):
+    ids = ",".join(str(pk) for pk in queryset.values_list("pk", flat=True))
+    return redirect(f"{reverse('admin:core_equipo_asignar_masivo')}?ids={ids}")
+
+
 @admin.register(Equipo)
 class EquipoAdmin(admin.ModelAdmin):
     form = EquipoForm
@@ -528,6 +610,8 @@ class EquipoAdmin(admin.ModelAdmin):
         "metodo_lectura",
         "estado_actual",
         "permite_reset_contador",
+        "en_linea_api",
+        "ultima_actualizacion_api",
         "contrato_activo",
         "cliente_activo",
     )
@@ -535,6 +619,7 @@ class EquipoAdmin(admin.ModelAdmin):
         "metodo_lectura",
         "estado_actual",
         "marca",
+        "en_linea_api",
         ("asignaciones__contrato", admin.RelatedOnlyFieldListFilter),
         ("asignaciones__contrato__cliente", admin.RelatedOnlyFieldListFilter),
     )
@@ -547,6 +632,7 @@ class EquipoAdmin(admin.ModelAdmin):
         "asignaciones__contrato__numero_contrato",
         "asignaciones__contrato__cliente__nombre",
     )
+    actions = [asignar_a_contrato_action]
 
     def get_queryset(self, request):
         # Los filtros/búsqueda por asignaciones__* hacen un JOIN; sin distinct()
@@ -581,8 +667,88 @@ class EquipoAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.descargar_plantilla_view),
                 name="core_equipo_importar_plantilla",
             ),
+            path(
+                "asignar-masivo/",
+                self.admin_site.admin_view(self.asignar_masivo_view),
+                name="core_equipo_asignar_masivo",
+            ),
         ]
         return urls + super().get_urls()
+
+    def asignar_masivo_view(self, request):
+        if not self.has_change_permission(request):
+            raise PermissionDenied
+
+        ids_texto = request.POST.get("ids") if request.method == "POST" else request.GET.get("ids", "")
+        ids = [int(pk) for pk in (ids_texto or "").split(",") if pk]
+        equipos = list(Equipo.objects.filter(pk__in=ids).order_by("numero_serie"))
+        if not equipos:
+            messages.warning(request, "No se seleccionó ningún equipo.")
+            return redirect("admin:core_equipo_changelist")
+
+        ya_asignados = set(
+            Asignacion.objects.filter(equipo_id__in=ids, fecha_fin__isnull=True).values_list(
+                "equipo_id", flat=True
+            )
+        )
+        equipos_disponibles = [e for e in equipos if e.pk not in ya_asignados]
+        if len(equipos_disponibles) < len(equipos):
+            messages.warning(
+                request,
+                f"{len(equipos) - len(equipos_disponibles)} equipo(s) ya tenían una asignación activa "
+                "y se omitieron de esta pantalla.",
+            )
+        if not equipos_disponibles:
+            messages.error(request, "Ninguno de los equipos seleccionados está disponible para asignar.")
+            return redirect("admin:core_equipo_changelist")
+
+        resultados = None
+        if request.method == "POST":
+            form = AsignarEquiposForm(request.POST, equipos=equipos_disponibles)
+            if form.is_valid():
+                contrato = form.cleaned_data["contrato"]
+                fecha_inicio = form.cleaned_data["fecha_inicio"]
+                resultados = []
+                for equipo in equipos_disponibles:
+                    fila = {
+                        "fecha_inicio_asignacion": fecha_inicio.isoformat(),
+                        "lectura_inicial_bn": form.cleaned_data[f"lectura_bn_{equipo.pk}"],
+                        "lectura_inicial_color": form.cleaned_data[f"lectura_color_{equipo.pk}"],
+                    }
+                    try:
+                        with transaction.atomic():
+                            detalle = asignar_equipo_a_contrato(equipo, contrato.numero_contrato, fila)
+                        resultados.append({"equipo": equipo.numero_serie, "detalle": detalle, "error": ""})
+                    except Exception as exc:  # noqa: BLE001 - se aísla el error por equipo a propósito
+                        resultados.append({"equipo": equipo.numero_serie, "detalle": "", "error": str(exc)})
+
+                con_error = [r for r in resultados if r["error"]]
+                creados = len(resultados) - len(con_error)
+                if con_error:
+                    messages.warning(
+                        request, f"{creados} asignación(es) creada(s), {len(con_error)} con error."
+                    )
+                elif creados:
+                    messages.success(
+                        request, f"{creados} equipo(s) asignado(s) al contrato {contrato.numero_contrato}."
+                    )
+        else:
+            form = AsignarEquiposForm(equipos=equipos_disponibles, initial={"fecha_inicio": timezone.localdate()})
+
+        filas_formulario = [
+            (equipo, form[f"lectura_bn_{equipo.pk}"], form[f"lectura_color_{equipo.pk}"])
+            for equipo in equipos_disponibles
+        ]
+        contexto = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "title": "Asignar equipos a un contrato",
+            "form": form,
+            "filas_formulario": filas_formulario,
+            "ids": ",".join(str(e.pk) for e in equipos_disponibles),
+            "resultados": resultados,
+        }
+        return render(request, "admin/core/equipo/asignar_masivo.html", contexto)
 
     def importar_equipos_view(self, request):
         if not self.has_add_permission(request):
@@ -797,6 +963,7 @@ class LecturaAdmin(admin.ModelAdmin):
 class FacturaAdmin(admin.ModelAdmin):
     list_display = (
         "contrato",
+        "emisor",
         "periodo_mes",
         "periodo_anio",
         "fecha_inicio",
@@ -808,7 +975,7 @@ class FacturaAdmin(admin.ModelAdmin):
         "enlace_pdf",
         "enlace_excel",
     )
-    list_filter = ("estado", "moneda", "periodo_anio", "periodo_mes")
+    list_filter = ("estado", "moneda", "emisor", "periodo_anio", "periodo_mes")
     search_fields = ("contrato__numero_contrato",)
     autocomplete_fields = ("contrato",)
 

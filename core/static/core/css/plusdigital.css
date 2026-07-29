@@ -94,6 +94,8 @@ a { color: var(--pd-navy-700); }
     flex-wrap: wrap;
     margin-bottom: 20px;
 }
+.pd-quick-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pd-quick-actions form { margin: 0; }
 .pd-content-head h1 {
     font-family: var(--pd-font-display);
     font-size: 26px;
@@ -236,3 +238,68 @@ a { color: var(--pd-navy-700); }
 
 /* --- Alertas operativas del dashboard --- */
 .pd-chip-alert { background: var(--pd-warning-bg); color: var(--pd-warning-fg); }
+
+/* --- Barra de acciones masivas (admin/actions.html) ---
+ * Oculta por defecto: solo aparece cuando hay filas seleccionadas (ver
+ * plusdigital.js), en vez de mostrar siempre un "---------" sin contexto. */
+.pd-actions {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    margin-bottom: 14px;
+    background: var(--pd-pending-bg);
+    border: 1px solid var(--pd-navy-500);
+    border-radius: 8px;
+    font-size: 14.5px;
+}
+.pd-actions.pd-actions-visible { display: flex; flex-wrap: wrap; }
+.pd-actions-ico {
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    background: var(--pd-navy-700);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    flex: none;
+}
+.pd-actions label { margin: 0; }
+/* select2 (ver jazzmin change_list.js) usa `width: 'element'`: calcula el
+ * ancho a partir del <select> real, así que hay que dárselo aquí para que
+ * el desplegable no salga angosto. */
+.pd-actions select { min-width: 320px; border: 1px solid var(--pd-line); border-radius: 6px; padding: 7px 10px; }
+.pd-actions .select2-container { min-width: 320px; }
+.pd-actions .select2-selection { min-height: 38px !important; border-radius: 6px !important; }
+.pd-actions .select2-selection__rendered { line-height: 38px !important; font-size: 14px; }
+.pd-actions .select2-selection__arrow { height: 36px !important; }
+.pd-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 18px;
+    font-size: 14px;
+}
+.pd-actions .action-counter {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--pd-navy-700);
+    font-weight: 600;
+}
+
+/* --- Botón "Importar X" junto a "Agregar X" en los listados (change_list.html) ---
+ * Jazzmin no envuelve el bloque object-tools en un <ul>, así que un <li>
+ * suelto con class="button" no tiene ningún estilo real (de ahí el bullet
+ * plano). Se reemplaza por un botón con el mismo tamaño que "Agregar X",
+ * en tono navy-outline para no competir visualmente con el verde de "Agregar". */
+.pd-btn-import {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--pd-navy-700);
+    border-color: var(--pd-navy-700);
+    background: var(--pd-surface);
+}
+.pd-btn-import:hover { background: var(--pd-navy-100); color: var(--pd-navy-700); }

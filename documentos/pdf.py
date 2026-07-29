@@ -1,3 +1,4 @@
+import base64
 from decimal import Decimal
 
 import weasyprint
@@ -28,6 +29,25 @@ def _tarifa(valor: Decimal, moneda: str = "MXN") -> str:
     que la multiplicación (copias × tarifa) le cuadre exacto al cliente."""
     simbolo = SIMBOLO_MONEDA.get(moneda, f"{moneda} ")
     return f"{simbolo}{valor:,.4f}"
+
+
+_TIPO_MIME_LOGO = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "svg": "image/svg+xml"}
+
+
+def _logo_data_uri(emisor) -> str | None:
+    """Data URI del logo del emisor, para incrustarlo en el PDF sin depender
+    de rutas de archivo (weasyprint no tiene por qué correr con acceso al
+    MEDIA_ROOT). None si el emisor no tiene logo cargado todavía."""
+    if emisor is None or not emisor.logo:
+        return None
+    try:
+        with emisor.logo.open("rb") as archivo:
+            datos = archivo.read()
+    except (FileNotFoundError, ValueError):
+        return None
+    extension = emisor.logo.name.rsplit(".", 1)[-1].lower()
+    tipo_mime = _TIPO_MIME_LOGO.get(extension, "image/png")
+    return f"data:{tipo_mime};base64,{base64.b64encode(datos).decode('ascii')}"
 
 
 def generar_pdf_factura(resultado: ResultadoFacturacion, contrato: Contrato) -> bytes:
@@ -62,7 +82,8 @@ def generar_pdf_factura(resultado: ResultadoFacturacion, contrato: Contrato) -> 
     total_consumo_color = sum((c.consumo_color for c in resultado.consumo_por_equipo), 0)
 
     contexto = {
-        "empresa_nombre": settings.EMPRESA_NOMBRE,
+        "empresa_nombre": resultado.emisor.nombre if resultado.emisor else settings.EMPRESA_NOMBRE,
+        "empresa_logo": _logo_data_uri(resultado.emisor),
         "contrato": contrato,
         "cliente": contrato.cliente,
         "periodo_texto": f"{MESES_ES[resultado.periodo_mes]} {resultado.periodo_anio}",

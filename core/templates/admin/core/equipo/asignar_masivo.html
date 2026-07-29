@@ -1,0 +1,101 @@
+{% extends "admin/base_site.html" %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Inicio</a>
+    &rsaquo; <a href="{% url 'admin:core_equipo_changelist' %}">Equipos</a>
+    &rsaquo; Asignar a un contrato
+</div>
+{% endblock %}
+
+{% block content %}
+<style>
+    .asignar-masivo .ayuda { max-width: 780px; margin-bottom: 16px; }
+    .asignar-masivo table.equipos,
+    .asignar-masivo table.resultados { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    .asignar-masivo table.equipos th, .asignar-masivo table.equipos td,
+    .asignar-masivo table.resultados th, .asignar-masivo table.resultados td {
+        border: 1px solid #ccc; padding: 5px 8px; font-size: 12.5px; text-align: left;
+    }
+    .asignar-masivo table.equipos th, .asignar-masivo table.resultados th { background: #f4f4f4; }
+    .asignar-masivo table.equipos input[type="number"] { width: 110px; }
+    .asignar-masivo tr.fila-error td { background: #fff2f2; }
+</style>
+
+<div id="content-main" class="asignar-masivo">
+    <div class="ayuda">
+        <p>
+            Vas a asignar <strong>{{ filas_formulario|length }}</strong> equipo(s) a un contrato. Todos quedarán
+            con la misma fecha de inicio; captura la lectura de referencia de cada uno (el punto de partida
+            antes de su primera lectura real) — si son equipos nuevos sin uso previo, deja 0.
+        </p>
+    </div>
+
+    <form method="post" class="pd-form-loading">
+        {% csrf_token %}
+        <input type="hidden" name="ids" value="{{ ids }}">
+
+        <div class="form-row">
+            {{ form.contrato.label_tag }} {{ form.contrato }}
+            {% if form.contrato.errors %}<p class="errornote">{{ form.contrato.errors|join:", " }}</p>{% endif %}
+        </div>
+        <div class="form-row">
+            {{ form.fecha_inicio.label_tag }} {{ form.fecha_inicio }}
+            {% if form.fecha_inicio.errors %}<p class="errornote">{{ form.fecha_inicio.errors|join:", " }}</p>{% endif %}
+        </div>
+
+        <table class="equipos">
+            <thead>
+                <tr>
+                    <th>Número de serie</th>
+                    <th>Marca / Modelo</th>
+                    <th>Lectura inicial BN</th>
+                    <th>Lectura inicial Color</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for equipo, campo_bn, campo_color in filas_formulario %}
+                <tr>
+                    <td>{{ equipo.numero_serie }}</td>
+                    <td>{{ equipo.marca }} {{ equipo.modelo }}</td>
+                    <td>
+                        {{ campo_bn }}
+                        {% if campo_bn.errors %}<p class="errornote">{{ campo_bn.errors|join:", " }}</p>{% endif %}
+                    </td>
+                    <td>
+                        {{ campo_color }}
+                        {% if campo_color.errors %}<p class="errornote">{{ campo_color.errors|join:", " }}</p>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="submit-row">
+            <input type="submit" value="Asignar equipos" class="default" data-pd-texto-carga="Asignando…">
+        </div>
+    </form>
+
+    {% if resultados %}
+    <h2>Resultado</h2>
+    <table class="resultados">
+        <thead>
+            <tr>
+                <th>Equipo</th>
+                <th>Detalle</th>
+                <th>Error</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in resultados %}
+            <tr class="{% if r.error %}fila-error{% endif %}">
+                <td>{{ r.equipo }}</td>
+                <td>{{ r.detalle }}</td>
+                <td>{{ r.error }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+</div>
+{% endblock %}

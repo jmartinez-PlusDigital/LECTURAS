@@ -8,10 +8,10 @@ alertas de auditoría pendientes y facturas recientes. Ver
 from datetime import date, timedelta
 from decimal import Decimal
 
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Exists, Max, OuterRef, Q, Sum
 from django.utils import timezone
 
-from core.models import Asignacion, Contrato, Factura, Lectura, LogEjecucion
+from core.models import Asignacion, Contrato, Equipo, Factura, Lectura, LogEjecucion, MetodoLectura
 
 MESES_CORTOS = [
     "", "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
@@ -37,7 +37,9 @@ def contexto_dashboard() -> dict:
     alertas_pendientes = _alertas_pendientes_activas()
     contratos_sin_lectura = _contratos_sin_lectura_proximos(hoy)
     contratos_por_vencer = _contratos_por_vencer(hoy)
+    contratos_lectura_desactualizada = _contratos_lectura_desactualizada(hoy)
     advertencias_consumo = _advertencias_consumo_recientes()
+    equipos_offline = _equipos_offline_3manager()
 
     facturas_recientes = list(
         Factura.objects.select_related("contrato", "contrato__cliente").order_by("-fecha_generacion")[:8]
@@ -52,8 +54,12 @@ def contexto_dashboard() -> dict:
         "alertas_pendientes": alertas_pendientes,
         "contratos_sin_lectura": contratos_sin_lectura,
         "contratos_por_vencer": contratos_por_vencer,
-        "alertas_operativas_count": len(contratos_sin_lectura) + len(contratos_por_vencer),
+        "contratos_lectura_desactualizada": contratos_lectura_desactualizada,
+        "alertas_operativas_count": (
+            len(contratos_sin_lectura) + len(contratos_por_vencer) + len(contratos_lectura_desactualizada)
+        ),
         "advertencias_consumo": advertencias_consumo,
+        "equipos_offline": equipos_offline,
         "facturas_recientes": facturas_recientes,
         "facturado_mes_por_moneda": facturado_mes_por_moneda,
         "tendencia_facturacion": facturacion_mensual(),
@@ -265,3 +271,60 @@ def _advertencias_consumo_recientes(dias: int = 30) -> list[dict]:
                 }
             )
     return filas
+
+
+def _equipos_offline_3manager() -> list[Equipo]:
+    """Equipos con lectura vía 3-Manager que la API reporta offline en este
+    momento (ver Equipo.en_linea_api, actualizado por sincronizar_lecturas)."""
+    equipos = list(
+        Equipo.objects.filter(metodo_lectura=MetodoLectura.API_3MANAGER, en_linea_api=False)
+        .exclude(estado_actual=Equipo.EstadoActual.BAJA)
+        .prefetch_related("asignaciones__contrato__cliente")
+        .order_by("numero_serie")
+    )
+    for equipo in equipos:
+        asignacion_activa = next((a for a in equipo.asignaciones.all() if a.fecha_fin is None), None)
+        equipo.contrato_activo = asignacion_activa.contrato if asignacion_activa else None
+    return equipos
+
+
+def _contratos_lectura_desactualizada(hoy: date, dias_alerta: int = 3) -> list[dict]:
+    """Contratos activos donde NINGÚN equipo asignado ha reportado una
+    lectura nueva en los últimos `dias_alerta` días — alerta temprana e
+    independiente del día de corte (a diferencia de
+    `_contratos_sin_lectura_proximos`), para detectar un agente/colector
+    caído (ej. 3-Manager desconectado) con tiempo de reaccionar antes de que
+    llegue el día de facturar. El candado (g) de auditoria/motor.py sigue
+    siendo el que de verdad bloquea la factura, con su propio umbral."""
+    limite = hoy - timedelta(days=dias_alerta)
+    # Dos .filter() por separado sobre la misma relación "asignaciones" no se
+    # combinan como cabría esperar (cada uno arma su propio join), así que
+    # "tiene una asignación activa" se resuelve aparte con un Exists()
+    # explícito en vez de encadenar otro .filter(asignaciones__...).
+    asignacion_activa = Asignacion.objects.filter(contrato=OuterRef("pk"), fecha_fin__isnull=True)
+    contratos = (
+        Contrato.objects.filter(estado=Contrato.Estado.ACTIVO)
+        .annotate(tiene_asignacion_activa=Exists(asignacion_activa))
+        .filter(tiene_asignacion_activa=True)
+        .annotate(
+            ultima_lectura_fecha=Max(
+                "asignaciones__lecturas__fecha", filter=Q(asignaciones__fecha_fin__isnull=True)
+            )
+        )
+        .filter(Q(ultima_lectura_fecha__lt=limite) | Q(ultima_lectura_fecha__isnull=True))
+        .select_related("cliente")
+        .distinct()
+    )
+
+    resultado = []
+    for contrato in contratos:
+        dias_sin_lectura = (hoy - contrato.ultima_lectura_fecha).days if contrato.ultima_lectura_fecha else None
+        resultado.append(
+            {
+                "contrato": contrato,
+                "ultima_lectura_fecha": contrato.ultima_lectura_fecha,
+                "dias_sin_lectura": dias_sin_lectura,
+            }
+        )
+    resultado.sort(key=lambda r: r["dias_sin_lectura"] if r["dias_sin_lectura"] is not None else 999999, reverse=True)
+    return resultado

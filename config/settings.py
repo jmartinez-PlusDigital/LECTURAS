@@ -208,7 +208,11 @@ JAZZMIN_SETTINGS = {
 
     "related_modal_active": True,
     "use_google_fonts_cdn": True,
-    "show_ui_builder": True,
+    # Ya construimos un tema propio (ver core/templates/admin/base.html y
+    # plusdigital.css) — el selector de temas en vivo de Jazzmin no aplica
+    # aquí, y en esta versión se renderiza roto (aparece como un bloque
+    # "Customize" en medio de la página en vez de un panel oculto).
+    "show_ui_builder": False,
 }
 
 JAZZMIN_UI_TWEAKS = {

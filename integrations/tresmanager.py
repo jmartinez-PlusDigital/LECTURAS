@@ -3,6 +3,7 @@ from datetime import date
 
 import requests
 from django.conf import settings
+from django.utils.dateparse import parse_datetime
 
 from .base import BaseLecturaClient, LecturaExterna
 from .exceptions import IntegrationConnectionError
@@ -55,7 +56,7 @@ class Cliente3Manager(BaseLecturaClient):
         from core.models import Cliente  # import diferido: evita ciclo integrations <-> core
 
         cuentas = list(
-            Cliente.objects.exclude(id_cuenta_3manager="").values_list("id_cuenta_3manager", flat=True)
+            Cliente.objects.exclude(id_cuenta_3manager="").values_list("nombre", "id_cuenta_3manager")
         )
         if not cuentas:
             logger.info("3-Manager: ningún Cliente tiene id_cuenta_3manager configurado.")
@@ -63,10 +64,23 @@ class Cliente3Manager(BaseLecturaClient):
 
         token = self._obtener_token()
         lecturas: dict[str, LecturaExterna] = {}
-        for account_id in cuentas:
-            payload = self._get_json(
-                self.devices_path.format(account_id=account_id), token, f"cuenta {account_id}"
-            )
+        for nombre_cliente, account_id in cuentas:
+            try:
+                payload = self._get_json(
+                    self.devices_path.format(account_id=account_id), token, f"cuenta {account_id}"
+                )
+            except IntegrationConnectionError as exc:
+                # Una cuenta con problemas (id inválido, acceso revocado, etc.)
+                # no debe tumbar la sincronización de las demás — se aísla y
+                # sigue, igual que el resto del sistema aísla errores por
+                # fila/ítem (ver p. ej. core.importacion_lecturas).
+                logger.warning(
+                    "3-Manager: no se pudieron obtener dispositivos de '%s' (account_id %s): %s",
+                    nombre_cliente,
+                    account_id,
+                    exc,
+                )
+                continue
             for item in payload.get("items", []):
                 lectura = self._parse_item(item)
                 if lectura is None:
@@ -169,9 +183,27 @@ class Cliente3Manager(BaseLecturaClient):
                 lectura_color=int(item.get("totalColor") or 0),
                 fecha=date.today(),
                 raw=item,
+                en_linea=self._parse_en_linea(item),
+                ultima_actualizacion=self._parse_ultima_actualizacion(item),
             )
         except (TypeError, ValueError) as exc:
             logger.warning(
                 "3-Manager: registro descartado por formato inválido (%s): %s", identificador, exc
             )
             return None
+
+    @staticmethod
+    def _parse_en_linea(item: dict) -> bool | None:
+        # 3-Manager reporta isOffline (bool); lo invertimos porque el resto
+        # del sistema piensa en términos de "en línea", no de "offline".
+        is_offline = item.get("isOffline")
+        if is_offline is None:
+            return None
+        return not is_offline
+
+    @staticmethod
+    def _parse_ultima_actualizacion(item: dict):
+        valor = item.get("latestReadingTime")
+        if not valor:
+            return None
+        return parse_datetime(valor)

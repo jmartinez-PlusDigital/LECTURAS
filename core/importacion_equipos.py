@@ -120,7 +120,7 @@ def _procesar_fila(numero_fila: int, fila: dict) -> dict:
                 resultado["asignacion"] = "sin contrato (sin_asignar)"
                 return resultado
 
-            resultado["asignacion"] = _asignar_a_contrato(equipo, numero_contrato, fila)
+            resultado["asignacion"] = asignar_equipo_a_contrato(equipo, numero_contrato, fila)
     except Exception as exc:  # noqa: BLE001 - se aísla el error por fila a propósito
         # La excepción hizo rollback de todo el bloque atomic() de esta fila
         # (incluyendo el update_or_create del equipo), así que el resultado
@@ -131,7 +131,12 @@ def _procesar_fila(numero_fila: int, fila: dict) -> dict:
     return resultado
 
 
-def _asignar_a_contrato(equipo: Equipo, numero_contrato: str, fila: dict) -> str:
+def asignar_equipo_a_contrato(equipo: Equipo, numero_contrato: str, fila: dict) -> str:
+    """Crea la Asignacion de `equipo` a `numero_contrato` a partir de una fila
+    con `fecha_inicio_asignacion`, `lectura_inicial_bn`, `lectura_inicial_color`
+    y opcionalmente `ip_red_cliente`. Pública porque también la usa la acción
+    "Asignar a un contrato" del Admin (ver EquipoAdmin.asignar_masivo_view en
+    core/admin.py), no solo el importador CSV."""
     try:
         contrato = Contrato.objects.get(numero_contrato=numero_contrato)
     except Contrato.DoesNotExist:

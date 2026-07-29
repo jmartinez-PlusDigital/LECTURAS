@@ -16,6 +16,12 @@
             <div class="pd-sub">{{ hoy|date:"l j \d\e F \d\e Y" }}</div>
         </div>
         <div class="pd-quick-actions">
+            {% if perms.core.change_equipo %}
+            <form method="post" action="{% url 'dashboard-sincronizar-lecturas' %}" class="pd-form-loading">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-secondary" data-pd-texto-carga="Sincronizando…">{% trans 'Sincronizar lecturas ahora' %}</button>
+            </form>
+            {% endif %}
             <a class="btn btn-outline-secondary" href="{% url 'admin:core_lectura_importar' %}">{% trans 'Importar lecturas' %}</a>
         </div>
     </div>
@@ -165,6 +171,39 @@
     </div>
 
     <div class="pd-panels">
+        <div class="pd-panel pd-panel-full">
+            <div class="pd-panel-head">
+                <h2>{% trans 'Sin lectura reciente' %}</h2>
+                <span class="pd-hint">{% trans 'ningún equipo del contrato reportó en 3+ días — posible agente/colector caído' %}</span>
+            </div>
+            <div class="pd-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{% trans 'Contrato' %}</th>
+                            <th>{% trans 'Cliente' %}</th>
+                            <th>{% trans 'Última lectura' %}</th>
+                            <th class="num">{% trans 'Días sin lectura' %}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for fila in contratos_lectura_desactualizada %}
+                        <tr>
+                            <td class="mono">{{ fila.contrato.numero_contrato }}</td>
+                            <td>{{ fila.contrato.cliente.nombre }}</td>
+                            <td>{% if fila.ultima_lectura_fecha %}{{ fila.ultima_lectura_fecha|date:"d/m/Y" }}{% else %}{% trans 'nunca' %}{% endif %}</td>
+                            <td class="num"><span class="pd-chip pd-chip-alert">{% if fila.dias_sin_lectura %}{{ fila.dias_sin_lectura }}{% else %}—{% endif %}</span></td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4">{% trans 'Todos los contratos activos tienen lectura reciente.' %}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="pd-panels">
         <div class="pd-panel">
             <div class="pd-panel-head">
                 <h2>{% trans 'Sin lectura, corte próximo' %}</h2>
@@ -240,6 +279,41 @@
                         </tr>
                         {% empty %}
                         <tr><td colspan="5">{% trans 'Sin advertencias de consumo en los últimos 30 días.' %}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="pd-panels">
+        <div class="pd-panel pd-panel-full">
+            <div class="pd-panel-head">
+                <h2>{% trans 'Equipos offline en 3-Manager' %}</h2>
+                <span class="pd-hint">{% trans 'estatus reportado en la última sincronización diaria' %}</span>
+            </div>
+            <div class="pd-table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>{% trans 'Número de serie' %}</th>
+                            <th>{% trans 'Marca / Modelo' %}</th>
+                            <th>{% trans 'Contrato' %}</th>
+                            <th>{% trans 'Cliente' %}</th>
+                            <th>{% trans 'Última actualización' %}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for equipo in equipos_offline %}
+                        <tr>
+                            <td class="mono">{{ equipo.numero_serie }}</td>
+                            <td>{{ equipo.marca }} {{ equipo.modelo }}</td>
+                            <td class="mono">{% if equipo.contrato_activo %}{{ equipo.contrato_activo.numero_contrato }}{% else %}—{% endif %}</td>
+                            <td>{% if equipo.contrato_activo %}{{ equipo.contrato_activo.cliente.nombre }}{% else %}—{% endif %}</td>
+                            <td><span class="pd-chip pd-chip-alert">{{ equipo.ultima_actualizacion_api|date:"d/m/Y H:i" }}</span></td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="5">{% trans 'Ningún equipo reportado offline por 3-Manager.' %}</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>

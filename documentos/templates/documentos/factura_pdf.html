@@ -31,6 +31,17 @@
         margin-bottom: 16px;
     }
 
+    .encabezado .marca {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+    }
+
+    .encabezado .logo-empresa {
+        height: 64px;
+        width: auto;
+    }
+
     .encabezado h1 {
         margin: 0;
         font-size: 18pt;
@@ -178,9 +189,12 @@
 <body>
 
 <div class="encabezado">
-    <div>
-        <h1>{{ empresa_nombre }}</h1>
-        <p class="subtitulo">Reporte de consumo y facturación mensual</p>
+    <div class="marca">
+        {% if empresa_logo %}<img src="{{ empresa_logo }}" alt="{{ empresa_nombre }}" class="logo-empresa">{% endif %}
+        <div>
+            <h1>{{ empresa_nombre }}</h1>
+            <p class="subtitulo">Reporte de consumo y facturación mensual</p>
+        </div>
     </div>
     <div class="folio">
         <div><strong>Contrato:</strong> {{ contrato.numero_contrato }}</div>

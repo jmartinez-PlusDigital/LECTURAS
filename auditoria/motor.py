@@ -94,21 +94,40 @@ def _auditar_asignacion(
 
     # (g) Falla de sincronización: solo equipos con método de lectura vía API.
     if equipo.metodo_lectura in (MetodoLectura.API_3MANAGER, MetodoLectura.API_PRINTAUDIT):
-        ultima_lectura = Lectura.objects.filter(asignacion=asignacion).order_by("-fecha").first()
-        limite = fecha_fin - timedelta(days=dias_falla_sincronizacion)
-        if ultima_lectura is None or ultima_lectura.fecha < limite:
+        if equipo.en_linea_api is False:
+            # Señal directa de la fuente (hoy solo 3-Manager la reporta): no
+            # hace falta esperar a que se noten días sin lectura nuestra.
             resultado.alertas.append(
                 AlertaAuditoria(
                     candado="g",
                     equipo_numero_serie=equipo.numero_serie,
                     bloqueante=True,
                     mensaje=(
-                        f"Equipo con método {equipo.metodo_lectura} sin lectura en los "
-                        f"últimos {dias_falla_sincronizacion} días."
+                        f"{equipo.metodo_lectura} reporta el equipo offline "
+                        f"(última actualización: {equipo.ultima_actualizacion_api})."
                     ),
-                    datos={"ultima_lectura": str(ultima_lectura.fecha) if ultima_lectura else None},
+                    datos={
+                        "en_linea_api": False,
+                        "ultima_actualizacion_api": str(equipo.ultima_actualizacion_api),
+                    },
                 )
             )
+        else:
+            ultima_lectura = Lectura.objects.filter(asignacion=asignacion).order_by("-fecha").first()
+            limite = fecha_fin - timedelta(days=dias_falla_sincronizacion)
+            if ultima_lectura is None or ultima_lectura.fecha < limite:
+                resultado.alertas.append(
+                    AlertaAuditoria(
+                        candado="g",
+                        equipo_numero_serie=equipo.numero_serie,
+                        bloqueante=True,
+                        mensaje=(
+                            f"Equipo con método {equipo.metodo_lectura} sin lectura en los "
+                            f"últimos {dias_falla_sincronizacion} días."
+                        ),
+                        datos={"ultima_lectura": str(ultima_lectura.fecha) if ultima_lectura else None},
+                    )
+                )
 
     consumo_bn_periodo = 0
     consumo_color_periodo = 0
