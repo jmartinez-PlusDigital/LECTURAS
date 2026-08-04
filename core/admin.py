@@ -417,6 +417,7 @@ class ContratoAdmin(admin.ModelAdmin):
         "enlace_equipos",
     )
     list_filter = ("estado", "moneda", "emisor")
+    list_select_related = ("cliente", "emisor")
     search_fields = ("numero_contrato", "cliente__nombre")
     autocomplete_fields = ("cliente",)
     date_hierarchy = "fecha_inicio"
@@ -649,19 +650,30 @@ class EquipoAdmin(admin.ModelAdmin):
             .prefetch_related("asignaciones__contrato__cliente")
         )
 
+    def _asignacion_activa(self, obj):
+        # contrato_activo/cliente_activo/ubicacion_activa la necesitan cada
+        # uno por separado (Django admin llama un método por columna) — se
+        # cachea en el objeto para no recorrer obj.asignaciones.all() tres
+        # veces por fila del listado.
+        if not hasattr(obj, "_asignacion_activa_cache"):
+            obj._asignacion_activa_cache = next(
+                (a for a in obj.asignaciones.all() if a.fecha_fin is None), None
+            )
+        return obj._asignacion_activa_cache
+
     @admin.display(description="Contrato actual")
     def contrato_activo(self, obj):
-        asignacion = next((a for a in obj.asignaciones.all() if a.fecha_fin is None), None)
+        asignacion = self._asignacion_activa(obj)
         return asignacion.contrato.numero_contrato if asignacion else "—"
 
     @admin.display(description="Cliente actual")
     def cliente_activo(self, obj):
-        asignacion = next((a for a in obj.asignaciones.all() if a.fecha_fin is None), None)
+        asignacion = self._asignacion_activa(obj)
         return asignacion.contrato.cliente.nombre if asignacion else "—"
 
     @admin.display(description="Departamento / Ubicación")
     def ubicacion_activa(self, obj):
-        asignacion = next((a for a in obj.asignaciones.all() if a.fecha_fin is None), None)
+        asignacion = self._asignacion_activa(obj)
         return (asignacion.ubicacion if asignacion else "") or "—"
 
     def get_urls(self):
@@ -863,6 +875,7 @@ class AsignacionAdmin(admin.ModelAdmin):
     form = AsignacionForm
     list_display = ("equipo", "contrato", "ubicacion", "fecha_inicio", "fecha_fin", "esta_activa")
     list_filter = ("contrato__estado", "fecha_fin")
+    list_select_related = ("equipo", "contrato")
     search_fields = ("equipo__numero_serie", "contrato__numero_contrato", "ubicacion")
     autocomplete_fields = ("equipo", "contrato")
     date_hierarchy = "fecha_inicio"
@@ -905,6 +918,7 @@ class LecturaAdmin(admin.ModelAdmin):
     change_list_template = "admin/core/lectura/change_list.html"
     list_display = ("asignacion", "fecha", "lectura_bn", "lectura_color", "origen", "estado_auditoria")
     list_filter = ("origen", "estado_auditoria")
+    list_select_related = ("asignacion__equipo", "asignacion__contrato")
     search_fields = ("asignacion__equipo__numero_serie", "asignacion__contrato__numero_contrato")
     autocomplete_fields = ("asignacion",)
     date_hierarchy = "fecha"
@@ -991,6 +1005,7 @@ class FacturaAdmin(admin.ModelAdmin):
         "enlace_excel",
     )
     list_filter = ("estado", "moneda", "emisor", "periodo_anio", "periodo_mes")
+    list_select_related = ("contrato", "emisor")
     search_fields = ("contrato__numero_contrato",)
     autocomplete_fields = ("contrato",)
 
