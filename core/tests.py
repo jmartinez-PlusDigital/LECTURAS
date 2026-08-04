@@ -15,6 +15,7 @@ from core.dashboard import (
     _equipos_offline_3manager,
     _facturado_mes_por_moneda,
     _ultimos_n_meses,
+    contexto_dashboard,
     excedente_mensual,
     facturacion_mensual,
 )
@@ -1269,3 +1270,74 @@ class AtencionRequeridaTestCase(TestCase):
 
     def test_sin_nada_pendiente_devuelve_lista_vacia(self):
         self.assertEqual(_atencion_requerida(date(2026, 7, 29)), [])
+
+
+class ContratosPorFacturarHoyTestCase(TestCase):
+    """"Contratos por facturar hoy" del dashboard (ver
+    core.dashboard.contexto_dashboard) — un contrato con corte hoy debe
+    dejar de aparecer ahí en cuanto ya tiene una factura OK del periodo en
+    curso, para no seguir invitando a facturarlo de nuevo."""
+
+    def _contrato(self, numero: str) -> Contrato:
+        hoy = timezone.localdate()
+        return Contrato.objects.create(
+            numero_contrato=numero,
+            cliente=Cliente.objects.create(nombre=f"Cliente {numero}"),
+            renta_base=Decimal("1000.00"),
+            costo_excedente_bn=Decimal("0.50"),
+            costo_excedente_color=Decimal("1.50"),
+            dia_corte_facturacion=hoy.day,
+            fecha_inicio=date(2020, 1, 1),
+        )
+
+    def test_contrato_con_corte_hoy_aparece_si_no_se_ha_facturado(self):
+        contrato = self._contrato("CT-PFH-1")
+
+        contexto = contexto_dashboard()
+
+        self.assertIn(contrato, contexto["contratos_hoy"])
+
+    def test_contrato_ya_facturado_este_periodo_desaparece_de_la_lista(self):
+        hoy = timezone.localdate()
+        contrato = self._contrato("CT-PFH-2")
+        Factura.objects.create(
+            contrato=contrato,
+            periodo_mes=hoy.month,
+            periodo_anio=hoy.year,
+            fecha_inicio=date(hoy.year, hoy.month, 1),
+            fecha_fin=hoy,
+            moneda="MXN",
+            estado=Factura.Estado.OK,
+            monto_renta=Decimal("1000.00"),
+            monto_excedente=Decimal("0.00"),
+            monto_iva=Decimal("160.00"),
+            monto_total=Decimal("1160.00"),
+        )
+
+        contexto = contexto_dashboard()
+
+        self.assertNotIn(contrato, contexto["contratos_hoy"])
+
+    def test_factura_pendiente_del_periodo_no_lo_oculta(self):
+        # Solo una factura OK cuenta como "ya facturado" — una en estado
+        # PENDIENTE (bloqueada por auditoría) no debe ocultar el contrato,
+        # sigue necesitando atención.
+        hoy = timezone.localdate()
+        contrato = self._contrato("CT-PFH-3")
+        Factura.objects.create(
+            contrato=contrato,
+            periodo_mes=hoy.month,
+            periodo_anio=hoy.year,
+            fecha_inicio=date(hoy.year, hoy.month, 1),
+            fecha_fin=hoy,
+            moneda="MXN",
+            estado=Factura.Estado.PENDIENTE,
+            monto_renta=Decimal("1000.00"),
+            monto_excedente=Decimal("0.00"),
+            monto_iva=Decimal("160.00"),
+            monto_total=Decimal("1160.00"),
+        )
+
+        contexto = contexto_dashboard()
+
+        self.assertIn(contrato, contexto["contratos_hoy"])

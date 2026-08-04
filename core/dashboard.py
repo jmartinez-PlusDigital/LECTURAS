@@ -22,8 +22,16 @@ MESES_CORTOS = [
 def contexto_dashboard() -> dict:
     hoy = timezone.localdate()
 
+    ya_facturado_este_periodo = Factura.objects.filter(
+        contrato=OuterRef("pk"),
+        periodo_mes=hoy.month,
+        periodo_anio=hoy.year,
+        estado=Factura.Estado.OK,
+    )
     contratos_hoy = list(
         Contrato.objects.filter(estado=Contrato.Estado.ACTIVO, dia_corte_facturacion=hoy.day)
+        .annotate(ya_facturado=Exists(ya_facturado_este_periodo))
+        .filter(ya_facturado=False)
         .select_related("cliente")
         .order_by("numero_contrato")
     )
