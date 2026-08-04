@@ -591,6 +591,9 @@ class AsignarEquiposForm(forms.Form):
             self.fields[f"lectura_color_{equipo.pk}"] = forms.IntegerField(
                 label="Lectura inicial Color", min_value=0, initial=0
             )
+            self.fields[f"ubicacion_{equipo.pk}"] = forms.CharField(
+                label="Departamento / Ubicación", max_length=100, required=False
+            )
 
 
 @admin.action(description="Asignar equipos seleccionados a un contrato")
@@ -614,6 +617,7 @@ class EquipoAdmin(admin.ModelAdmin):
         "ultima_actualizacion_api",
         "contrato_activo",
         "cliente_activo",
+        "ubicacion_activa",
     )
     list_filter = (
         "metodo_lectura",
@@ -654,6 +658,11 @@ class EquipoAdmin(admin.ModelAdmin):
     def cliente_activo(self, obj):
         asignacion = next((a for a in obj.asignaciones.all() if a.fecha_fin is None), None)
         return asignacion.contrato.cliente.nombre if asignacion else "—"
+
+    @admin.display(description="Departamento / Ubicación")
+    def ubicacion_activa(self, obj):
+        asignacion = next((a for a in obj.asignaciones.all() if a.fecha_fin is None), None)
+        return (asignacion.ubicacion if asignacion else "") or "—"
 
     def get_urls(self):
         urls = [
@@ -714,6 +723,7 @@ class EquipoAdmin(admin.ModelAdmin):
                         "fecha_inicio_asignacion": fecha_inicio.isoformat(),
                         "lectura_inicial_bn": form.cleaned_data[f"lectura_bn_{equipo.pk}"],
                         "lectura_inicial_color": form.cleaned_data[f"lectura_color_{equipo.pk}"],
+                        "ubicacion": form.cleaned_data[f"ubicacion_{equipo.pk}"],
                     }
                     try:
                         with transaction.atomic():
@@ -736,7 +746,12 @@ class EquipoAdmin(admin.ModelAdmin):
             form = AsignarEquiposForm(equipos=equipos_disponibles, initial={"fecha_inicio": timezone.localdate()})
 
         filas_formulario = [
-            (equipo, form[f"lectura_bn_{equipo.pk}"], form[f"lectura_color_{equipo.pk}"])
+            (
+                equipo,
+                form[f"lectura_bn_{equipo.pk}"],
+                form[f"lectura_color_{equipo.pk}"],
+                form[f"ubicacion_{equipo.pk}"],
+            )
             for equipo in equipos_disponibles
         ]
         contexto = {
@@ -846,9 +861,9 @@ def _avisar_lecturas_con_anomalia(request, lecturas):
 @admin.register(Asignacion)
 class AsignacionAdmin(admin.ModelAdmin):
     form = AsignacionForm
-    list_display = ("equipo", "contrato", "fecha_inicio", "fecha_fin", "esta_activa")
+    list_display = ("equipo", "contrato", "ubicacion", "fecha_inicio", "fecha_fin", "esta_activa")
     list_filter = ("contrato__estado", "fecha_fin")
-    search_fields = ("equipo__numero_serie", "contrato__numero_contrato")
+    search_fields = ("equipo__numero_serie", "contrato__numero_contrato", "ubicacion")
     autocomplete_fields = ("equipo", "contrato")
     date_hierarchy = "fecha_inicio"
     inlines = [LecturaInline]

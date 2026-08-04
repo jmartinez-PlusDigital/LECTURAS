@@ -73,6 +73,7 @@ def generar_excel_factura(resultado: ResultadoFacturacion, contrato: Contrato) -
     encabezados = [
         "Número de serie",
         "Marca / Modelo",
+        "Departamento / Ubicación",
         "Fecha lect. anterior",
         "Lect. anterior BN",
         "Lect. anterior Color",
@@ -96,12 +97,13 @@ def generar_excel_factura(resultado: ResultadoFacturacion, contrato: Contrato) -
         for e in Equipo.objects.filter(numero_serie__in=series).only("numero_serie", "marca", "modelo")
     }
 
-    columnas_numericas = {4, 5, 7, 8, 9, 10}
+    columnas_numericas = {5, 6, 8, 9, 10, 11}
     fila = fila_encabezado_tabla + 1
     for consumo in resultado.consumo_por_equipo:
         valores = (
             consumo.equipo_numero_serie,
             marcas_modelos.get(consumo.equipo_numero_serie, ""),
+            consumo.ubicacion,
             consumo.fecha_lectura_anterior.strftime("%d/%m/%Y"),
             consumo.lectura_anterior_bn,
             consumo.lectura_anterior_color,
@@ -118,7 +120,7 @@ def generar_excel_factura(resultado: ResultadoFacturacion, contrato: Contrato) -
                 celda.number_format = FORMATO_ENTERO
                 celda.alignment = Alignment(horizontal="right")
         if fila % 2 == 0:
-            for col in range(1, 11):
+            for col in range(1, 12):
                 ws.cell(row=fila, column=col).fill = relleno_alterno
         fila += 1
 
@@ -130,9 +132,9 @@ def generar_excel_factura(resultado: ResultadoFacturacion, contrato: Contrato) -
         fila += 1
     else:
         ws.cell(row=fila, column=1, value="Total consumo del periodo").font = Font(bold=True, color=AZUL_OSCURO)
-        ws.cell(row=fila, column=9, value=total_consumo_bn).font = Font(bold=True, color=AZUL_OSCURO)
-        ws.cell(row=fila, column=10, value=total_consumo_color).font = Font(bold=True, color=AZUL_OSCURO)
-        for col in (9, 10):
+        ws.cell(row=fila, column=10, value=total_consumo_bn).font = Font(bold=True, color=AZUL_OSCURO)
+        ws.cell(row=fila, column=11, value=total_consumo_color).font = Font(bold=True, color=AZUL_OSCURO)
+        for col in (10, 11):
             ws.cell(row=fila, column=col).number_format = FORMATO_ENTERO
             ws.cell(row=fila, column=col).alignment = Alignment(horizontal="right")
         borde_total = Border(
@@ -141,7 +143,7 @@ def generar_excel_factura(resultado: ResultadoFacturacion, contrato: Contrato) -
             left=borde_fino,
             right=borde_fino,
         )
-        for col in range(1, 11):
+        for col in range(1, 12):
             ws.cell(row=fila, column=col).border = borde_total
         fila += 1
 
@@ -195,7 +197,7 @@ def generar_excel_factura(resultado: ResultadoFacturacion, contrato: Contrato) -
             ws.cell(row=fila, column=col).border = borde_fila
         fila += 1
 
-    anchos = [18, 28, 16, 18, 17, 16, 14, 16, 12, 14]
+    anchos = [18, 28, 20, 16, 18, 17, 16, 14, 16, 12, 14]
     for i, ancho in enumerate(anchos, start=1):
         ws.column_dimensions[get_column_letter(i)].width = ancho
 

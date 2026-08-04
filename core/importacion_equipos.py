@@ -18,6 +18,7 @@ Columnas esperadas (encabezados exactos, en cualquier orden):
     lectura_inicial_bn       (requerido si numero_contrato está presente)
     lectura_inicial_color    (requerido si numero_contrato está presente)
     ip_red_cliente           (opcional)
+    ubicacion                (opcional: departamento/área donde está instalado, p. ej. "Almacén")
 
 Un equipo sin numero_contrato se crea con estado_actual='sin_asignar' (en
 bodega). Si se da numero_contrato y el equipo no tiene ya una asignación
@@ -167,6 +168,7 @@ def asignar_equipo_a_contrato(equipo: Equipo, numero_contrato: str, fila: dict) 
         lectura_inicial_referencia_bn=lectura_bn,
         lectura_inicial_referencia_color=lectura_color,
         ip_red_cliente=_texto(fila.get("ip_red_cliente")) or None,
+        ubicacion=_texto(fila.get("ubicacion")),
     )
     equipo.estado_actual = Equipo.EstadoActual.ACTIVO
     equipo.save(update_fields=["estado_actual"])

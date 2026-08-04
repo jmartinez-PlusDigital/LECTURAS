@@ -10,6 +10,7 @@ from django.utils import timezone
 from auditoria.tipos import AlertaAuditoria, ResultadoAuditoria
 from core.dashboard import (
     _advertencias_consumo_recientes,
+    _atencion_requerida,
     _contratos_lectura_desactualizada,
     _equipos_offline_3manager,
     _facturado_mes_por_moneda,
@@ -768,6 +769,31 @@ class AsignarEquipoAContratoTestCase(TestCase):
         self.equipo.refresh_from_db()
         self.assertEqual(self.equipo.estado_actual, Equipo.EstadoActual.ACTIVO)
 
+    def test_ubicacion_opcional_se_guarda_en_la_asignacion(self):
+        asignar_equipo_a_contrato(
+            self.equipo,
+            self.contrato.numero_contrato,
+            {
+                "fecha_inicio_asignacion": "2026-02-01",
+                "lectura_inicial_bn": 0,
+                "lectura_inicial_color": 0,
+                "ubicacion": "Almacén",
+            },
+        )
+
+        asignacion = Asignacion.objects.get(equipo=self.equipo)
+        self.assertEqual(asignacion.ubicacion, "Almacén")
+
+    def test_ubicacion_ausente_queda_en_blanco(self):
+        asignar_equipo_a_contrato(
+            self.equipo,
+            self.contrato.numero_contrato,
+            {"fecha_inicio_asignacion": "2026-02-01", "lectura_inicial_bn": 0, "lectura_inicial_color": 0},
+        )
+
+        asignacion = Asignacion.objects.get(equipo=self.equipo)
+        self.assertEqual(asignacion.ubicacion, "")
+
     def test_equipo_ya_asignado_a_otro_contrato_es_error(self):
         otro_contrato = Contrato.objects.create(
             numero_contrato="CT-ASIG-2",
@@ -1148,3 +1174,98 @@ class ContratosLecturaDesactualizadaTestCase(TestCase):
 
         numeros = [r["contrato"].numero_contrato for r in resultado]
         self.assertLess(numeros.index("CT-DESACT-5A"), numeros.index("CT-DESACT-5B"))
+
+
+class AtencionRequeridaTestCase(TestCase):
+    """Panel único del dashboard que reemplazó las 5 tablas separadas de
+    alertas no bloqueantes (ver core.dashboard._atencion_requerida)."""
+
+    def test_contrato_sin_lectura_aparece_con_accion_a_historial(self):
+        contrato = Contrato.objects.create(
+            numero_contrato="CT-ATN-1",
+            cliente=Cliente.objects.create(nombre="Cliente Atencion 1"),
+            renta_base=Decimal("1000.00"),
+            costo_excedente_bn=Decimal("0.50"),
+            costo_excedente_color=Decimal("1.50"),
+            dia_corte_facturacion=27,
+            fecha_inicio=date(2026, 1, 1),
+        )
+        equipo = Equipo.objects.create(
+            numero_serie="SN-ATN-1", marca="Canon", modelo="X1", metodo_lectura="manual"
+        )
+        Asignacion.objects.create(
+            equipo=equipo,
+            contrato=contrato,
+            fecha_inicio=date(2026, 1, 1),
+            lectura_inicial_referencia_bn=0,
+            lectura_inicial_referencia_color=0,
+        )
+        # Sin ninguna lectura -> cae en _contratos_lectura_desactualizada.
+
+        resultado = _atencion_requerida(date(2026, 7, 29))
+
+        filas = [f for f in resultado if f["contrato"].numero_contrato == "CT-ATN-1"]
+        self.assertEqual(len(filas), 1)
+        self.assertEqual(filas[0]["tipo_label"], "Sin lectura")
+        self.assertEqual(filas[0]["prioridad"], 1)
+        self.assertIn(f"/contrato/{contrato.pk}/historial-lecturas/", filas[0]["accion_url"])
+
+    def test_contrato_por_vencer_aparece_con_accion_a_su_ficha(self):
+        contrato = Contrato.objects.create(
+            numero_contrato="CT-ATN-2",
+            cliente=Cliente.objects.create(nombre="Cliente Atencion 2"),
+            renta_base=Decimal("1000.00"),
+            costo_excedente_bn=Decimal("0.50"),
+            costo_excedente_color=Decimal("1.50"),
+            dia_corte_facturacion=27,
+            fecha_inicio=date(2020, 1, 1),
+            fecha_fin=date(2026, 8, 10),
+        )
+
+        resultado = _atencion_requerida(date(2026, 7, 29))
+
+        filas = [f for f in resultado if f["contrato"].numero_contrato == "CT-ATN-2"]
+        self.assertEqual(len(filas), 1)
+        self.assertEqual(filas[0]["tipo_label"], "Por vencer")
+        self.assertEqual(filas[0]["prioridad"], 4)
+        self.assertIn(f"/core/contrato/{contrato.pk}/change/", filas[0]["accion_url"])
+
+    def test_ordena_por_prioridad_sin_lectura_antes_que_por_vencer(self):
+        cliente = Cliente.objects.create(nombre="Cliente Atencion Orden")
+        contrato_vence = Contrato.objects.create(
+            numero_contrato="CT-ATN-3A",
+            cliente=cliente,
+            renta_base=Decimal("1000.00"),
+            costo_excedente_bn=Decimal("0.50"),
+            costo_excedente_color=Decimal("1.50"),
+            dia_corte_facturacion=27,
+            fecha_inicio=date(2020, 1, 1),
+            fecha_fin=date(2026, 8, 10),
+        )
+        contrato_sin_lectura = Contrato.objects.create(
+            numero_contrato="CT-ATN-3B",
+            cliente=cliente,
+            renta_base=Decimal("1000.00"),
+            costo_excedente_bn=Decimal("0.50"),
+            costo_excedente_color=Decimal("1.50"),
+            dia_corte_facturacion=27,
+            fecha_inicio=date(2026, 1, 1),
+        )
+        equipo = Equipo.objects.create(
+            numero_serie="SN-ATN-3B", marca="Canon", modelo="X1", metodo_lectura="manual"
+        )
+        Asignacion.objects.create(
+            equipo=equipo,
+            contrato=contrato_sin_lectura,
+            fecha_inicio=date(2026, 1, 1),
+            lectura_inicial_referencia_bn=0,
+            lectura_inicial_referencia_color=0,
+        )
+
+        resultado = _atencion_requerida(date(2026, 7, 29))
+
+        numeros = [f["contrato"].numero_contrato for f in resultado]
+        self.assertLess(numeros.index("CT-ATN-3B"), numeros.index("CT-ATN-3A"))
+
+    def test_sin_nada_pendiente_devuelve_lista_vacia(self):
+        self.assertEqual(_atencion_requerida(date(2026, 7, 29)), [])

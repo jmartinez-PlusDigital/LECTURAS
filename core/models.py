@@ -178,6 +178,16 @@ class Asignacion(TimestampedModel):
     lectura_cierre_bn = models.PositiveIntegerField(null=True, blank=True)
     lectura_cierre_color = models.PositiveIntegerField(null=True, blank=True)
     ip_red_cliente = models.GenericIPAddressField(null=True, blank=True)
+    ubicacion = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name="Departamento / Ubicación",
+        help_text=(
+            "Área o departamento donde está instalado el equipo dentro de las instalaciones del "
+            "cliente (ej. Almacén, Recepción, Contabilidad). Aparece en el PDF y Excel de factura "
+            "para clientes que segmentan el cobro por área."
+        ),
+    )
 
     class Meta:
         ordering = ["-fecha_inicio"]

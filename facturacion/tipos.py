@@ -15,6 +15,7 @@ class ConsumoEquipo:
     lectura_actual_bn: int
     lectura_actual_color: int
     fecha_lectura_actual: date
+    ubicacion: str = ""
 
 
 @dataclass
@@ -56,6 +57,7 @@ class ResultadoFacturacion:
                     "lectura_actual_bn": c.lectura_actual_bn,
                     "lectura_actual_color": c.lectura_actual_color,
                     "fecha_lectura_actual": str(c.fecha_lectura_actual),
+                    "ubicacion": c.ubicacion,
                 }
                 for c in self.consumo_por_equipo
             ],

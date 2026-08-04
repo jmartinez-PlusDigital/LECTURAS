@@ -229,6 +229,7 @@
         <tr>
             <th rowspan="2">Equipo</th>
             <th rowspan="2">Marca / Modelo</th>
+            <th rowspan="2">Departamento / Ubicación</th>
             <th class="grupo" colspan="3">Lectura anterior</th>
             <th class="grupo" colspan="3">Lectura actual</th>
             <th class="num" rowspan="2">Consumo BN</th>
@@ -248,6 +249,7 @@
         <tr>
             <td>{{ fila.numero_serie }}</td>
             <td>{{ fila.marca_modelo }}</td>
+            <td>{{ fila.ubicacion|default:"—" }}</td>
             <td class="num separador">{{ fila.fecha_lectura_anterior }}</td>
             <td class="num">{{ fila.lectura_anterior_bn }}</td>
             <td class="num">{{ fila.lectura_anterior_color }}</td>
@@ -258,11 +260,11 @@
             <td class="num">{{ fila.consumo_color }}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="10">Sin equipos con consumo registrado en este periodo.</td></tr>
+        <tr><td colspan="11">Sin equipos con consumo registrado en este periodo.</td></tr>
         {% endfor %}
         {% if equipos %}
         <tr class="fila-total">
-            <td colspan="8" style="text-align:right;">Total consumo del periodo</td>
+            <td colspan="9" style="text-align:right;">Total consumo del periodo</td>
             <td class="num separador">{{ total_consumo_bn }}</td>
             <td class="num">{{ total_consumo_color }}</td>
         </tr>

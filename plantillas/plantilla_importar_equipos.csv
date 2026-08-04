@@ -1,4 +1,4 @@
-numero_serie,marca,modelo,metodo_lectura,id_externo_3manager,id_externo_printaudit,permite_reset_contador,tope_contador,numero_contrato,fecha_inicio_asignacion,lectura_inicial_bn,lectura_inicial_color,ip_red_cliente
-SN-EJEMPLO-001,Canon,iR-ADV C5535,manual,,,false,,CT-0001,2026-01-01,0,0,
-SN-EJEMPLO-002,Xerox,VersaLink C405,api_3manager,DEV-1234,,true,999999,CT-0001,2026-01-01,0,0,192.168.1.50
-SN-EJEMPLO-003,Ricoh,MP C3004,manual,,,false,,,,,,
+numero_serie,marca,modelo,metodo_lectura,id_externo_3manager,id_externo_printaudit,permite_reset_contador,tope_contador,numero_contrato,fecha_inicio_asignacion,lectura_inicial_bn,lectura_inicial_color,ip_red_cliente,ubicacion
+SN-EJEMPLO-001,Canon,iR-ADV C5535,manual,,,false,,CT-0001,2026-01-01,0,0,,Almacén
+SN-EJEMPLO-002,Xerox,VersaLink C405,api_3manager,DEV-1234,,true,999999,CT-0001,2026-01-01,0,0,192.168.1.50,Recepción
+SN-EJEMPLO-003,Ricoh,MP C3004,manual,,,false,,,,,,,

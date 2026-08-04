@@ -75,6 +75,17 @@ class FacturacionTestCase(TestCase):
         self.assertEqual(resultado.monto_iva, iva_esperado)
         self.assertEqual(resultado.monto_total, subtotal + iva_esperado)
 
+    def test_ubicacion_de_la_asignacion_se_propaga_al_consumo(self):
+        equipo = self._equipo("SN-FAC-UBIC")
+        asignacion = self._asignacion(equipo, ubicacion="Almacén")
+        Lectura.objects.create(
+            asignacion=asignacion, fecha=date(2026, 1, 31), lectura_bn=500, lectura_color=100, origen="manual"
+        )
+
+        resultado = calcular_factura(self.contrato, date(2026, 1, 1), date(2026, 1, 31), 1, 2026)
+
+        self.assertEqual(resultado.consumo_por_equipo[0].ubicacion, "Almacén")
+
     def test_primer_mes_de_asignacion_usa_lectura_referencia(self):
         equipo = self._equipo("SN-FAC-3")
         asignacion = self._asignacion(

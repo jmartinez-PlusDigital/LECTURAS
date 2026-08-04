@@ -216,6 +216,7 @@ JAZZMIN_SETTINGS = {
 }
 
 JAZZMIN_UI_TWEAKS = {
+    "default_theme_mode": "dark",
     "navbar_small_text": False,
     "footer_fixed": False,
     "sidebar_fixed": True,

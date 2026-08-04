@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.db.models import Count, Exists, Max, OuterRef, Q, Sum
+from django.urls import reverse
 from django.utils import timezone
 
 from core.models import Asignacion, Contrato, Equipo, Factura, Lectura, LogEjecucion, MetodoLectura
@@ -35,11 +36,7 @@ def contexto_dashboard() -> dict:
         ).count()
 
     alertas_pendientes = _alertas_pendientes_activas()
-    contratos_sin_lectura = _contratos_sin_lectura_proximos(hoy)
-    contratos_por_vencer = _contratos_por_vencer(hoy)
-    contratos_lectura_desactualizada = _contratos_lectura_desactualizada(hoy)
-    advertencias_consumo = _advertencias_consumo_recientes()
-    equipos_offline = _equipos_offline_3manager()
+    atencion_requerida = _atencion_requerida(hoy)
 
     facturas_recientes = list(
         Factura.objects.select_related("contrato", "contrato__cliente").order_by("-fecha_generacion")[:8]
@@ -52,14 +49,8 @@ def contexto_dashboard() -> dict:
         "contratos_activos_count": Contrato.objects.filter(estado=Contrato.Estado.ACTIVO).count(),
         "contratos_hoy": contratos_hoy,
         "alertas_pendientes": alertas_pendientes,
-        "contratos_sin_lectura": contratos_sin_lectura,
-        "contratos_por_vencer": contratos_por_vencer,
-        "contratos_lectura_desactualizada": contratos_lectura_desactualizada,
-        "alertas_operativas_count": (
-            len(contratos_sin_lectura) + len(contratos_por_vencer) + len(contratos_lectura_desactualizada)
-        ),
-        "advertencias_consumo": advertencias_consumo,
-        "equipos_offline": equipos_offline,
+        "atencion_requerida": atencion_requerida,
+        "alertas_operativas_count": len(atencion_requerida),
         "facturas_recientes": facturas_recientes,
         "facturado_mes_por_moneda": facturado_mes_por_moneda,
         "tendencia_facturacion": facturacion_mensual(),
@@ -328,3 +319,90 @@ def _contratos_lectura_desactualizada(hoy: date, dias_alerta: int = 3) -> list[d
         )
     resultado.sort(key=lambda r: r["dias_sin_lectura"] if r["dias_sin_lectura"] is not None else 999999, reverse=True)
     return resultado
+
+
+def _atencion_requerida(hoy: date) -> list[dict]:
+    """Consolida en una sola lista las alertas no bloqueantes del dashboard
+    (a diferencia de `_alertas_pendientes_activas`, que sí bloquean la
+    factura) — antes eran 5 tablas separadas que casi siempre estaban vacías
+    a la vez; ahora es una sola, ordenada por urgencia, con una acción
+    directa por fila en vez de solo texto informativo."""
+    filas = []
+
+    for fila in _contratos_lectura_desactualizada(hoy):
+        contrato = fila["contrato"]
+        detalle = (
+            f"Sin lectura desde el {fila['ultima_lectura_fecha']:%d/%m/%Y} "
+            f"({fila['dias_sin_lectura']} días) — posible agente/colector caído"
+            if fila["ultima_lectura_fecha"]
+            else "Nunca ha tenido una lectura registrada"
+        )
+        filas.append(
+            {
+                "prioridad": 1,
+                "tipo_label": "Sin lectura",
+                "chip_clase": "pd-chip-crit",
+                "contrato": contrato,
+                "detalle": detalle,
+                "accion_url": reverse("admin:core_contrato_historial_lecturas", args=[contrato.pk]),
+                "accion_texto": "Ver historial",
+            }
+        )
+
+    for equipo in _equipos_offline_3manager():
+        if equipo.contrato_activo is None:
+            continue
+        filas.append(
+            {
+                "prioridad": 1,
+                "tipo_label": "Offline",
+                "chip_clase": "pd-chip-crit",
+                "contrato": equipo.contrato_activo,
+                "detalle": f"{equipo.numero_serie} ({equipo.marca} {equipo.modelo}) reportado offline por 3-Manager",
+                "accion_url": reverse("admin:core_equipo_change", args=[equipo.pk]),
+                "accion_texto": "Ver equipo",
+            }
+        )
+
+    for contrato in _contratos_sin_lectura_proximos(hoy):
+        filas.append(
+            {
+                "prioridad": 2,
+                "tipo_label": "Corte próximo",
+                "chip_clase": "pd-chip-warn",
+                "contrato": contrato,
+                "detalle": f"Corte el {contrato.proximo_corte:%d/%m}, todavía sin lectura este mes",
+                "accion_url": reverse("admin:core_contrato_historial_lecturas", args=[contrato.pk]),
+                "accion_texto": "Ver historial",
+            }
+        )
+
+    for advertencia in _advertencias_consumo_recientes():
+        contrato = advertencia["contrato"]
+        filas.append(
+            {
+                "prioridad": 3,
+                "tipo_label": "Consumo atípico",
+                "chip_clase": "pd-chip-warn",
+                "contrato": contrato,
+                "detalle": f"{advertencia['equipo']}: {advertencia['mensaje']}",
+                "accion_url": reverse("admin:core_contrato_historial_lecturas", args=[contrato.pk]),
+                "accion_texto": "Ver historial",
+            }
+        )
+
+    for contrato in _contratos_por_vencer(hoy):
+        filas.append(
+            {
+                "prioridad": 4,
+                "tipo_label": "Por vencer",
+                "chip_clase": "pd-chip-pending",
+                "contrato": contrato,
+                "detalle": f"Vence el {contrato.fecha_fin:%d/%m/%Y}",
+                "accion_url": reverse("admin:core_contrato_change", args=[contrato.pk]),
+                "accion_texto": "Ver contrato",
+            }
+        )
+
+    filas.sort(key=lambda f: f["prioridad"])
+    return filas

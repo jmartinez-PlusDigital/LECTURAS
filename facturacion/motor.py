@@ -92,6 +92,7 @@ def _calcular(
                     lectura_actual_bn=ultima_lectura_valida.lectura_bn,
                     lectura_actual_color=ultima_lectura_valida.lectura_color,
                     fecha_lectura_actual=ultima_lectura_valida.fecha,
+                    ubicacion=asignacion.ubicacion,
                 )
             )
             total_consumo_bn += consumo_bn

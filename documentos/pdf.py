@@ -64,6 +64,7 @@ def generar_pdf_factura(resultado: ResultadoFacturacion, contrato: Contrato) -> 
         {
             "numero_serie": consumo.equipo_numero_serie,
             "marca_modelo": marcas_modelos.get(consumo.equipo_numero_serie, ""),
+            "ubicacion": consumo.ubicacion,
             "fecha_lectura_anterior": consumo.fecha_lectura_anterior.strftime("%d/%m/%Y"),
             "lectura_anterior_bn": consumo.lectura_anterior_bn,
             "lectura_anterior_color": consumo.lectura_anterior_color,

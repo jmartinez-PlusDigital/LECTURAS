@@ -231,7 +231,7 @@
         {% if jazzmin_settings.show_sidebar %}
             {% get_side_menu as side_menu_list %}
 
-            <aside class="app-sidebar bg-body-secondary shadow {{ jazzmin_ui.sidebar_classes }}" id="jazzy-sidebar" data-bs-theme="light">
+            <aside class="app-sidebar bg-body-secondary shadow {{ jazzmin_ui.sidebar_classes }}" id="jazzy-sidebar">
                 <div class="sidebar-brand">
                     <a href="{% url 'admin:index' %}" class="brand-link {{ jazzmin_ui.brand_classes }}" id="jazzy-logo">
                         <img src="{% static jazzmin_settings.site_logo %}" alt="{{ jazzmin_settings.site_header }} Logo" class="{{ jazzmin_settings.site_logo_classes }} brand-image opacity-75 shadow">

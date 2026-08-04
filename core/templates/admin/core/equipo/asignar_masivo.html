@@ -15,11 +15,11 @@
     .asignar-masivo table.resultados { border-collapse: collapse; width: 100%; margin-top: 12px; }
     .asignar-masivo table.equipos th, .asignar-masivo table.equipos td,
     .asignar-masivo table.resultados th, .asignar-masivo table.resultados td {
-        border: 1px solid #ccc; padding: 5px 8px; font-size: 12.5px; text-align: left;
+        border: 1px solid var(--pd-line); padding: 5px 8px; font-size: 12.5px; text-align: left;
     }
-    .asignar-masivo table.equipos th, .asignar-masivo table.resultados th { background: #f4f4f4; }
+    .asignar-masivo table.equipos th, .asignar-masivo table.resultados th { background: var(--pd-line); }
     .asignar-masivo table.equipos input[type="number"] { width: 110px; }
-    .asignar-masivo tr.fila-error td { background: #fff2f2; }
+    .asignar-masivo tr.fila-error td { background: var(--pd-critical-bg); }
 </style>
 
 <div id="content-main" class="asignar-masivo">
@@ -49,15 +49,20 @@
                 <tr>
                     <th>Número de serie</th>
                     <th>Marca / Modelo</th>
+                    <th>Departamento / Ubicación</th>
                     <th>Lectura inicial BN</th>
                     <th>Lectura inicial Color</th>
                 </tr>
             </thead>
             <tbody>
-                {% for equipo, campo_bn, campo_color in filas_formulario %}
+                {% for equipo, campo_bn, campo_color, campo_ubicacion in filas_formulario %}
                 <tr>
                     <td>{{ equipo.numero_serie }}</td>
                     <td>{{ equipo.marca }} {{ equipo.modelo }}</td>
+                    <td>
+                        {{ campo_ubicacion }}
+                        {% if campo_ubicacion.errors %}<p class="errornote">{{ campo_ubicacion.errors|join:", " }}</p>{% endif %}
+                    </td>
                     <td>
                         {{ campo_bn }}
                         {% if campo_bn.errors %}<p class="errornote">{{ campo_bn.errors|join:", " }}</p>{% endif %}
