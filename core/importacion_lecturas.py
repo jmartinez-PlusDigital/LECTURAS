@@ -26,14 +26,12 @@ resto). `dry_run=True` valida todo pero no persiste nada.
 """
 import csv
 import io
-from datetime import date
-from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 from django.utils import timezone
-from django.utils.dateparse import parse_date
 
-from core.archivos import leer_filas
+from core.importacion_comun import escribir_reporte_csv as _escribir_reporte_csv
+from core.importacion_comun import entero, fecha, procesar_archivo, texto
 from core.models import Asignacion, Contrato, Equipo, Lectura, MetodoLectura
 
 COLUMNAS_REPORTE = ["fila", "numero_serie", "fecha", "lectura", "advertencia", "error"]
@@ -46,17 +44,7 @@ def procesar_archivo_lecturas(archivo, nombre_archivo: str, *, dry_run: bool = F
     `UploadedFile` de Django) abierto en modo binario. `nombre_archivo` se usa
     solo para decidir el formato por su extensión.
     """
-    filas = list(leer_filas(archivo, nombre_archivo))
-    if not filas:
-        return []
-
-    resultados = []
-    with transaction.atomic():
-        for numero_fila, fila in enumerate(filas, start=2):  # fila 1 = encabezados
-            resultados.append(_procesar_fila(numero_fila, fila))
-        if dry_run:
-            transaction.set_rollback(True)
-    return resultados
+    return procesar_archivo(archivo, nombre_archivo, _procesar_fila, dry_run=dry_run)
 
 
 def resumen_de(resultados: list[dict]) -> dict:
@@ -73,17 +61,7 @@ def resumen_de(resultados: list[dict]) -> dict:
 
 def escribir_reporte_csv(destino, resultados: list[dict]) -> None:
     """`destino` puede ser una ruta (str) o un objeto tipo archivo en modo texto."""
-    if isinstance(destino, str):
-        with open(destino, "w", newline="", encoding="utf-8") as f:
-            _escribir_csv(f, resultados)
-    else:
-        _escribir_csv(destino, resultados)
-
-
-def _escribir_csv(f, resultados: list[dict]) -> None:
-    writer = csv.DictWriter(f, fieldnames=COLUMNAS_REPORTE)
-    writer.writeheader()
-    writer.writerows(resultados)
+    _escribir_reporte_csv(destino, resultados, COLUMNAS_REPORTE)
 
 
 # --- plantilla pre-llenada por contrato -----------------------------------
@@ -151,7 +129,7 @@ def _procesar_fila(numero_fila: int, fila: dict) -> dict:
     }
     try:
         with transaction.atomic():
-            numero_serie = _texto(fila.get("numero_serie"))
+            numero_serie = texto(fila.get("numero_serie"))
             if not numero_serie:
                 raise ValueError("numero_serie es requerido")
             resultado["numero_serie"] = numero_serie
@@ -169,28 +147,28 @@ def _procesar_fila(numero_fila: int, fila: dict) -> dict:
             if asignacion is None:
                 raise ValueError("el equipo no tiene una asignación activa")
 
-            numero_contrato = _texto(fila.get("numero_contrato"))
+            numero_contrato = texto(fila.get("numero_contrato"))
             if numero_contrato and numero_contrato != asignacion.contrato.numero_contrato:
                 raise ValueError(
                     f"el equipo está asignado al contrato '{asignacion.contrato.numero_contrato}', "
                     f"no a '{numero_contrato}'"
                 )
 
-            fecha = _fecha(fila.get("fecha")) or timezone.localdate()
-            if fecha < asignacion.fecha_inicio:
+            fecha_lectura = fecha(fila.get("fecha")) or timezone.localdate()
+            if fecha_lectura < asignacion.fecha_inicio:
                 raise ValueError(
-                    f"la fecha {fecha} es anterior al inicio de la asignación ({asignacion.fecha_inicio})"
+                    f"la fecha {fecha_lectura} es anterior al inicio de la asignación ({asignacion.fecha_inicio})"
                 )
-            resultado["fecha"] = str(fecha)
+            resultado["fecha"] = str(fecha_lectura)
 
-            lectura_bn = _entero(fila.get("lectura_bn"))
-            lectura_color = _entero(fila.get("lectura_color"))
+            lectura_bn = entero(fila.get("lectura_bn"))
+            lectura_color = entero(fila.get("lectura_color"))
             if lectura_bn is None or lectura_color is None:
                 raise ValueError("lectura_bn y lectura_color son requeridas")
 
             lectura, creada = Lectura.objects.update_or_create(
                 asignacion=asignacion,
-                fecha=fecha,
+                fecha=fecha_lectura,
                 defaults={
                     "lectura_bn": lectura_bn,
                     "lectura_color": lectura_color,
@@ -205,30 +183,3 @@ def _procesar_fila(numero_fila: int, fila: dict) -> dict:
         resultado["lectura"] = ""
         resultado["error"] = str(exc)
     return resultado
-
-
-def _texto(valor) -> str:
-    if valor is None:
-        return ""
-    return str(valor).strip()
-
-
-def _entero(valor):
-    texto = _texto(valor)
-    if not texto:
-        return None
-    try:
-        return int(Decimal(texto))
-    except (InvalidOperation, ValueError):
-        raise ValueError(f"valor numérico inválido: '{valor}'")
-
-
-def _fecha(valor):
-    if valor is None or valor == "":
-        return None
-    if isinstance(valor, date):
-        return valor
-    fecha = parse_date(_texto(valor))
-    if fecha is None:
-        raise ValueError(f"fecha inválida: '{valor}'. Usa formato YYYY-MM-DD.")
-    return fecha

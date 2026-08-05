@@ -22,14 +22,12 @@ Si ya existe un cliente con ese `nombre`, se actualiza en vez de duplicarse.
 Cada fila se procesa de forma aislada (un error en una fila no detiene el
 resto). `dry_run=True` valida todo pero no persiste nada.
 """
-import csv
-
 from django.db import transaction
 
-from core.archivos import leer_filas
+from core.importacion_comun import escribir_reporte_csv as _escribir_reporte_csv
+from core.importacion_comun import booleano, procesar_archivo, texto
 from core.models import Cliente
 
-VALORES_VERDADEROS = {"1", "true", "verdadero", "si", "sí", "x", "yes"}
 COLUMNAS_REPORTE = ["fila", "nombre", "cliente", "error"]
 
 
@@ -40,17 +38,7 @@ def procesar_archivo_clientes(archivo, nombre_archivo: str, *, dry_run: bool = F
     `UploadedFile` de Django) abierto en modo binario. `nombre_archivo` se usa
     solo para decidir el formato por su extensión.
     """
-    filas = list(leer_filas(archivo, nombre_archivo))
-    if not filas:
-        return []
-
-    resultados = []
-    with transaction.atomic():
-        for numero_fila, fila in enumerate(filas, start=2):  # fila 1 = encabezados
-            resultados.append(_procesar_fila(numero_fila, fila))
-        if dry_run:
-            transaction.set_rollback(True)
-    return resultados
+    return procesar_archivo(archivo, nombre_archivo, _procesar_fila, dry_run=dry_run)
 
 
 def resumen_de(resultados: list[dict]) -> dict:
@@ -65,17 +53,7 @@ def resumen_de(resultados: list[dict]) -> dict:
 
 def escribir_reporte_csv(destino, resultados: list[dict]) -> None:
     """`destino` puede ser una ruta (str) o un objeto tipo archivo en modo texto."""
-    if isinstance(destino, str):
-        with open(destino, "w", newline="", encoding="utf-8") as f:
-            _escribir_csv(f, resultados)
-    else:
-        _escribir_csv(destino, resultados)
-
-
-def _escribir_csv(f, resultados: list[dict]) -> None:
-    writer = csv.DictWriter(f, fieldnames=COLUMNAS_REPORTE)
-    writer.writeheader()
-    writer.writerows(resultados)
+    _escribir_reporte_csv(destino, resultados, COLUMNAS_REPORTE)
 
 
 # --- procesamiento por fila ------------------------------------------------
@@ -84,7 +62,7 @@ def _procesar_fila(numero_fila: int, fila: dict) -> dict:
     resultado = {"fila": numero_fila, "nombre": "", "cliente": "", "error": ""}
     try:
         with transaction.atomic():
-            nombre = _texto(fila.get("nombre"))
+            nombre = texto(fila.get("nombre"))
             if not nombre:
                 raise ValueError("nombre es requerido")
             resultado["nombre"] = nombre
@@ -92,14 +70,14 @@ def _procesar_fila(numero_fila: int, fila: dict) -> dict:
             cliente, creado = Cliente.objects.update_or_create(
                 nombre=nombre,
                 defaults={
-                    "razon_social": _texto(fila.get("razon_social")),
-                    "rfc": _texto(fila.get("rfc")),
-                    "contacto_nombre": _texto(fila.get("contacto_nombre")),
-                    "contacto_email": _texto(fila.get("contacto_email")),
-                    "contacto_telefono": _texto(fila.get("contacto_telefono")),
-                    "direccion": _texto(fila.get("direccion")),
-                    "activo": _booleano(fila.get("activo"), default=True),
-                    "id_cuenta_3manager": _texto(fila.get("id_cuenta_3manager")),
+                    "razon_social": texto(fila.get("razon_social")),
+                    "rfc": texto(fila.get("rfc")),
+                    "contacto_nombre": texto(fila.get("contacto_nombre")),
+                    "contacto_email": texto(fila.get("contacto_email")),
+                    "contacto_telefono": texto(fila.get("contacto_telefono")),
+                    "direccion": texto(fila.get("direccion")),
+                    "activo": booleano(fila.get("activo"), default=True),
+                    "id_cuenta_3manager": texto(fila.get("id_cuenta_3manager")),
                 },
             )
             resultado["cliente"] = "creado" if creado else "actualizado"
@@ -107,16 +85,3 @@ def _procesar_fila(numero_fila: int, fila: dict) -> dict:
         resultado["cliente"] = ""
         resultado["error"] = str(exc)
     return resultado
-
-
-def _texto(valor) -> str:
-    if valor is None:
-        return ""
-    return str(valor).strip()
-
-
-def _booleano(valor, *, default: bool) -> bool:
-    texto = _texto(valor)
-    if not texto:
-        return default
-    return texto.lower() in VALORES_VERDADEROS

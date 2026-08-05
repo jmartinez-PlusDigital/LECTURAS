@@ -27,17 +27,12 @@ activa, se crea la Asignacion y el equipo pasa a estado_actual='activo'.
 Cada fila se procesa de forma aislada (un error en una fila no detiene el
 resto). `dry_run=True` valida todo pero no persiste nada.
 """
-import csv
-from datetime import date
-from decimal import Decimal, InvalidOperation
-
 from django.db import transaction
-from django.utils.dateparse import parse_date
 
-from core.archivos import leer_filas
+from core.importacion_comun import escribir_reporte_csv as _escribir_reporte_csv
+from core.importacion_comun import booleano, entero, fecha, procesar_archivo, texto
 from core.models import Asignacion, Contrato, Equipo, MetodoLectura
 
-VALORES_VERDADEROS = {"1", "true", "verdadero", "si", "sí", "x", "yes"}
 COLUMNAS_REPORTE = ["fila", "numero_serie", "equipo", "asignacion", "error"]
 
 
@@ -48,17 +43,7 @@ def procesar_archivo_equipos(archivo, nombre_archivo: str, *, dry_run: bool = Fa
     `UploadedFile` de Django) abierto en modo binario. `nombre_archivo` se usa
     solo para decidir el formato por su extensión.
     """
-    filas = list(leer_filas(archivo, nombre_archivo))
-    if not filas:
-        return []
-
-    resultados = []
-    with transaction.atomic():
-        for numero_fila, fila in enumerate(filas, start=2):  # fila 1 = encabezados
-            resultados.append(_procesar_fila(numero_fila, fila))
-        if dry_run:
-            transaction.set_rollback(True)
-    return resultados
+    return procesar_archivo(archivo, nombre_archivo, _procesar_fila, dry_run=dry_run)
 
 
 def resumen_de(resultados: list[dict]) -> dict:
@@ -74,17 +59,7 @@ def resumen_de(resultados: list[dict]) -> dict:
 
 def escribir_reporte_csv(destino, resultados: list[dict]) -> None:
     """`destino` puede ser una ruta (str) o un objeto tipo archivo en modo texto."""
-    if isinstance(destino, str):
-        with open(destino, "w", newline="", encoding="utf-8") as f:
-            _escribir_csv(f, resultados)
-    else:
-        _escribir_csv(destino, resultados)
-
-
-def _escribir_csv(f, resultados: list[dict]) -> None:
-    writer = csv.DictWriter(f, fieldnames=COLUMNAS_REPORTE)
-    writer.writeheader()
-    writer.writerows(resultados)
+    _escribir_reporte_csv(destino, resultados, COLUMNAS_REPORTE)
 
 
 # --- procesamiento por fila ----------------------------------------------
@@ -93,30 +68,30 @@ def _procesar_fila(numero_fila: int, fila: dict) -> dict:
     resultado = {"fila": numero_fila, "numero_serie": "", "equipo": "", "asignacion": "", "error": ""}
     try:
         with transaction.atomic():
-            numero_serie = _texto(fila.get("numero_serie"))
+            numero_serie = texto(fila.get("numero_serie"))
             if not numero_serie:
                 raise ValueError("numero_serie es requerido")
             resultado["numero_serie"] = numero_serie
 
-            metodo_lectura = _texto(fila.get("metodo_lectura")) or MetodoLectura.MANUAL
+            metodo_lectura = texto(fila.get("metodo_lectura")) or MetodoLectura.MANUAL
             if metodo_lectura not in MetodoLectura.values:
                 raise ValueError(f"metodo_lectura inválido: '{metodo_lectura}'")
 
             equipo, creado = Equipo.objects.update_or_create(
                 numero_serie=numero_serie,
                 defaults={
-                    "marca": _texto(fila.get("marca")),
-                    "modelo": _texto(fila.get("modelo")),
+                    "marca": texto(fila.get("marca")),
+                    "modelo": texto(fila.get("modelo")),
                     "metodo_lectura": metodo_lectura,
-                    "id_externo_3manager": _texto(fila.get("id_externo_3manager")) or None,
-                    "id_externo_printaudit": _texto(fila.get("id_externo_printaudit")) or None,
-                    "permite_reset_contador": _booleano(fila.get("permite_reset_contador")),
-                    "tope_contador": _entero(fila.get("tope_contador")),
+                    "id_externo_3manager": texto(fila.get("id_externo_3manager")) or None,
+                    "id_externo_printaudit": texto(fila.get("id_externo_printaudit")) or None,
+                    "permite_reset_contador": booleano(fila.get("permite_reset_contador")),
+                    "tope_contador": entero(fila.get("tope_contador")),
                 },
             )
             resultado["equipo"] = "creado" if creado else "actualizado"
 
-            numero_contrato = _texto(fila.get("numero_contrato"))
+            numero_contrato = texto(fila.get("numero_contrato"))
             if not numero_contrato:
                 resultado["asignacion"] = "sin contrato (sin_asignar)"
                 return resultado
@@ -152,12 +127,12 @@ def asignar_equipo_a_contrato(equipo: Equipo, numero_contrato: str, fila: dict) 
             f"'{asignacion_activa.contrato.numero_contrato}'; ciérrala manualmente antes de reasignar"
         )
 
-    fecha_inicio = _fecha(fila.get("fecha_inicio_asignacion"))
+    fecha_inicio = fecha(fila.get("fecha_inicio_asignacion"))
     if fecha_inicio is None:
         raise ValueError("fecha_inicio_asignacion es requerida y debe tener formato YYYY-MM-DD")
 
-    lectura_bn = _entero(fila.get("lectura_inicial_bn"))
-    lectura_color = _entero(fila.get("lectura_inicial_color"))
+    lectura_bn = entero(fila.get("lectura_inicial_bn"))
+    lectura_color = entero(fila.get("lectura_inicial_color"))
     if lectura_bn is None or lectura_color is None:
         raise ValueError("lectura_inicial_bn y lectura_inicial_color son requeridas")
 
@@ -167,37 +142,9 @@ def asignar_equipo_a_contrato(equipo: Equipo, numero_contrato: str, fila: dict) 
         fecha_inicio=fecha_inicio,
         lectura_inicial_referencia_bn=lectura_bn,
         lectura_inicial_referencia_color=lectura_color,
-        ip_red_cliente=_texto(fila.get("ip_red_cliente")) or None,
-        ubicacion=_texto(fila.get("ubicacion")),
+        ip_red_cliente=texto(fila.get("ip_red_cliente")) or None,
+        ubicacion=texto(fila.get("ubicacion")),
     )
     equipo.estado_actual = Equipo.EstadoActual.ACTIVO
     equipo.save(update_fields=["estado_actual"])
     return f"creada (contrato {numero_contrato})"
-
-
-def _texto(valor) -> str:
-    if valor is None:
-        return ""
-    return str(valor).strip()
-
-
-def _booleano(valor) -> bool:
-    return _texto(valor).lower() in VALORES_VERDADEROS
-
-
-def _entero(valor):
-    texto = _texto(valor)
-    if not texto:
-        return None
-    try:
-        return int(Decimal(texto))
-    except (InvalidOperation, ValueError):
-        raise ValueError(f"valor numérico inválido: '{valor}'")
-
-
-def _fecha(valor):
-    if valor is None or valor == "":
-        return None
-    if isinstance(valor, date):
-        return valor
-    return parse_date(_texto(valor))

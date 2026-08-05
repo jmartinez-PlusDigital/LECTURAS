@@ -102,7 +102,12 @@ def importar_equipos_3manager(modeladmin, request, queryset):
             messages.warning(request, f"{cliente.nombre}: {len(con_error)} con error — {detalle}")
 
 
-class ImportarClientesForm(forms.Form):
+class ImportarArchivoForm(forms.Form):
+    """Un solo formulario para los 4 importadores masivos (clientes, contratos,
+    equipos, lecturas) — el archivo y el dry_run son lo único que captura el
+    usuario en cualquiera de los 4, la validación específica de cada modelo
+    vive en `core.importacion_*`, no aquí."""
+
     archivo = forms.FileField(label="Archivo (.csv, .xlsx o .xls)")
     dry_run = forms.BooleanField(
         label="Solo validar, no guardar todavía", required=False, initial=True
@@ -113,6 +118,67 @@ class ImportarClientesForm(forms.Form):
         if not archivo.name.lower().endswith((".csv", ".xlsx", ".xls")):
             raise ValidationError("El archivo debe ser .csv, .xlsx o .xls.")
         return archivo
+
+
+class ImportadorArchivoMixin:
+    """Mixin para un ModelAdmin con una vista "Importar X" (subir CSV/Excel,
+    con opción de dry_run) y su descarga de plantilla, reemplazando lo que
+    antes eran 4 pares de vistas casi idénticas (una por modelo). Cada
+    ModelAdmin que lo usa define estos 4 atributos y registra
+    `self.importar_view`/`self.descargar_plantilla_importador_view` en su
+    `get_urls()` bajo los nombres de URL que ya usaban las plantillas
+    (`core_<modelo>_importar` / `core_<modelo>_importar_plantilla`)."""
+
+    importador_procesar_archivo: staticmethod  # (archivo, nombre_archivo, *, dry_run) -> list[dict]
+    importador_resumen_de: staticmethod  # (resultados) -> dict
+    importador_titulo: str
+    importador_template: str
+    importador_plantilla: str  # nombre del archivo en plantillas/
+
+    def importar_view(self, request):
+        if not self.has_add_permission(request):
+            raise PermissionDenied
+
+        resultados = None
+        resumen = None
+
+        if request.method == "POST":
+            form = ImportarArchivoForm(request.POST, request.FILES)
+            if form.is_valid():
+                archivo = form.cleaned_data["archivo"]
+                dry_run = form.cleaned_data["dry_run"]
+                resultados = self.importador_procesar_archivo(archivo, archivo.name, dry_run=dry_run)
+                if not resultados:
+                    messages.warning(request, "El archivo no tiene filas de datos.")
+                else:
+                    resumen = self.importador_resumen_de(resultados)
+                    if dry_run:
+                        messages.info(request, "Validación en seco: no se guardó ningún cambio todavía.")
+                    elif resumen["con_error"]:
+                        messages.warning(
+                            request,
+                            f"Importación completada con {len(resumen['con_error'])} fila(s) con error.",
+                        )
+                    else:
+                        messages.success(request, f"Importación completada: {resumen['total']} fila(s) procesadas.")
+        else:
+            form = ImportarArchivoForm()
+
+        contexto = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "title": self.importador_titulo,
+            "form": form,
+            "resultados": resultados,
+            "resumen": resumen,
+        }
+        return render(request, self.importador_template, contexto)
+
+    def descargar_plantilla_importador_view(self, request):
+        if not self.has_add_permission(request):
+            raise PermissionDenied
+        ruta = Path(settings.BASE_DIR) / "plantillas" / self.importador_plantilla
+        return FileResponse(open(ruta, "rb"), as_attachment=True, filename=ruta.name)
 
 
 @admin.register(EmpresaEmisora)
@@ -128,7 +194,7 @@ class EmpresaEmisoraAdmin(admin.ModelAdmin):
 
 
 @admin.register(Cliente)
-class ClienteAdmin(admin.ModelAdmin):
+class ClienteAdmin(ImportadorArchivoMixin, admin.ModelAdmin):
     change_list_template = "admin/core/cliente/change_list.html"
     list_display = (
         "nombre",
@@ -144,6 +210,12 @@ class ClienteAdmin(admin.ModelAdmin):
     search_fields = ("nombre", "razon_social", "rfc", "contacto_email")
     actions = [buscar_cuenta_3manager, importar_equipos_3manager]
 
+    importador_procesar_archivo = staticmethod(procesar_archivo_clientes)
+    importador_resumen_de = staticmethod(resumen_de_clientes)
+    importador_titulo = "Importar clientes"
+    importador_template = "admin/core/cliente/importar_clientes.html"
+    importador_plantilla = "plantilla_importar_clientes.csv"
+
     @admin.display(description="Equipos")
     def enlace_equipos(self, obj):
         url = reverse("admin:core_equipo_changelist")
@@ -155,61 +227,16 @@ class ClienteAdmin(admin.ModelAdmin):
         urls = [
             path(
                 "importar/",
-                self.admin_site.admin_view(self.importar_clientes_view),
+                self.admin_site.admin_view(self.importar_view),
                 name="core_cliente_importar",
             ),
             path(
                 "importar/plantilla/",
-                self.admin_site.admin_view(self.descargar_plantilla_view),
+                self.admin_site.admin_view(self.descargar_plantilla_importador_view),
                 name="core_cliente_importar_plantilla",
             ),
         ]
         return urls + super().get_urls()
-
-    def importar_clientes_view(self, request):
-        if not self.has_add_permission(request):
-            raise PermissionDenied
-
-        resultados = None
-        resumen = None
-
-        if request.method == "POST":
-            form = ImportarClientesForm(request.POST, request.FILES)
-            if form.is_valid():
-                archivo = form.cleaned_data["archivo"]
-                dry_run = form.cleaned_data["dry_run"]
-                resultados = procesar_archivo_clientes(archivo, archivo.name, dry_run=dry_run)
-                if not resultados:
-                    messages.warning(request, "El archivo no tiene filas de datos.")
-                else:
-                    resumen = resumen_de_clientes(resultados)
-                    if dry_run:
-                        messages.info(request, "Validación en seco: no se guardó ningún cambio todavía.")
-                    elif resumen["con_error"]:
-                        messages.warning(
-                            request,
-                            f"Importación completada con {len(resumen['con_error'])} fila(s) con error.",
-                        )
-                    else:
-                        messages.success(request, f"Importación completada: {resumen['total']} fila(s) procesadas.")
-        else:
-            form = ImportarClientesForm()
-
-        contexto = {
-            **self.admin_site.each_context(request),
-            "opts": self.model._meta,
-            "title": "Importar clientes",
-            "form": form,
-            "resultados": resultados,
-            "resumen": resumen,
-        }
-        return render(request, "admin/core/cliente/importar_clientes.html", contexto)
-
-    def descargar_plantilla_view(self, request):
-        if not self.has_add_permission(request):
-            raise PermissionDenied
-        ruta = Path(settings.BASE_DIR) / "plantillas" / "plantilla_importar_clientes.csv"
-        return FileResponse(open(ruta, "rb"), as_attachment=True, filename=ruta.name)
 
 
 def _leer_rango_fechas(request):
@@ -386,21 +413,8 @@ class ContratoForm(forms.ModelForm):
         return cleaned_data
 
 
-class ImportarContratosForm(forms.Form):
-    archivo = forms.FileField(label="Archivo (.csv, .xlsx o .xls)")
-    dry_run = forms.BooleanField(
-        label="Solo validar, no guardar todavía", required=False, initial=True
-    )
-
-    def clean_archivo(self):
-        archivo = self.cleaned_data["archivo"]
-        if not archivo.name.lower().endswith((".csv", ".xlsx", ".xls")):
-            raise ValidationError("El archivo debe ser .csv, .xlsx o .xls.")
-        return archivo
-
-
 @admin.register(Contrato)
-class ContratoAdmin(admin.ModelAdmin):
+class ContratoAdmin(ImportadorArchivoMixin, admin.ModelAdmin):
     form = ContratoForm
     change_list_template = "admin/core/contrato/change_list.html"
     list_display = (
@@ -422,6 +436,12 @@ class ContratoAdmin(admin.ModelAdmin):
     autocomplete_fields = ("cliente",)
     date_hierarchy = "fecha_inicio"
     actions = [facturar_ahora, descargar_plantilla_lecturas]
+
+    importador_procesar_archivo = staticmethod(procesar_archivo_contratos)
+    importador_resumen_de = staticmethod(resumen_de_contratos)
+    importador_titulo = "Importar contratos"
+    importador_template = "admin/core/contrato/importar_contratos.html"
+    importador_plantilla = "plantilla_importar_contratos.csv"
 
     @admin.display(description="Historial")
     def enlace_historial(self, obj):
@@ -447,61 +467,16 @@ class ContratoAdmin(admin.ModelAdmin):
             ),
             path(
                 "importar/",
-                self.admin_site.admin_view(self.importar_contratos_view),
+                self.admin_site.admin_view(self.importar_view),
                 name="core_contrato_importar",
             ),
             path(
                 "importar/plantilla/",
-                self.admin_site.admin_view(self.descargar_plantilla_contratos_view),
+                self.admin_site.admin_view(self.descargar_plantilla_importador_view),
                 name="core_contrato_importar_plantilla",
             ),
         ]
         return urls + super().get_urls()
-
-    def importar_contratos_view(self, request):
-        if not self.has_add_permission(request):
-            raise PermissionDenied
-
-        resultados = None
-        resumen = None
-
-        if request.method == "POST":
-            form = ImportarContratosForm(request.POST, request.FILES)
-            if form.is_valid():
-                archivo = form.cleaned_data["archivo"]
-                dry_run = form.cleaned_data["dry_run"]
-                resultados = procesar_archivo_contratos(archivo, archivo.name, dry_run=dry_run)
-                if not resultados:
-                    messages.warning(request, "El archivo no tiene filas de datos.")
-                else:
-                    resumen = resumen_de_contratos(resultados)
-                    if dry_run:
-                        messages.info(request, "Validación en seco: no se guardó ningún cambio todavía.")
-                    elif resumen["con_error"]:
-                        messages.warning(
-                            request,
-                            f"Importación completada con {len(resumen['con_error'])} fila(s) con error.",
-                        )
-                    else:
-                        messages.success(request, f"Importación completada: {resumen['total']} fila(s) procesadas.")
-        else:
-            form = ImportarContratosForm()
-
-        contexto = {
-            **self.admin_site.each_context(request),
-            "opts": self.model._meta,
-            "title": "Importar contratos",
-            "form": form,
-            "resultados": resultados,
-            "resumen": resumen,
-        }
-        return render(request, "admin/core/contrato/importar_contratos.html", contexto)
-
-    def descargar_plantilla_contratos_view(self, request):
-        if not self.has_add_permission(request):
-            raise PermissionDenied
-        ruta = Path(settings.BASE_DIR) / "plantillas" / "plantilla_importar_contratos.csv"
-        return FileResponse(open(ruta, "rb"), as_attachment=True, filename=ruta.name)
 
     def historial_lecturas_view(self, request, contrato_id):
         contrato = get_object_or_404(Contrato, pk=contrato_id)
@@ -547,32 +522,6 @@ class EquipoForm(forms.ModelForm):
         return cleaned_data
 
 
-class ImportarEquiposForm(forms.Form):
-    archivo = forms.FileField(label="Archivo (.csv, .xlsx o .xls)")
-    dry_run = forms.BooleanField(
-        label="Solo validar, no guardar todavía", required=False, initial=True
-    )
-
-    def clean_archivo(self):
-        archivo = self.cleaned_data["archivo"]
-        if not archivo.name.lower().endswith((".csv", ".xlsx", ".xls")):
-            raise ValidationError("El archivo debe ser .csv, .xlsx o .xls.")
-        return archivo
-
-
-class ImportarLecturasForm(forms.Form):
-    archivo = forms.FileField(label="Archivo (.csv, .xlsx o .xls)")
-    dry_run = forms.BooleanField(
-        label="Solo validar, no guardar todavía", required=False, initial=True
-    )
-
-    def clean_archivo(self):
-        archivo = self.cleaned_data["archivo"]
-        if not archivo.name.lower().endswith((".csv", ".xlsx", ".xls")):
-            raise ValidationError("El archivo debe ser .csv, .xlsx o .xls.")
-        return archivo
-
-
 class AsignarEquiposForm(forms.Form):
     contrato = forms.ModelChoiceField(
         queryset=Contrato.objects.filter(estado=Contrato.Estado.ACTIVO).order_by("numero_contrato"),
@@ -604,9 +553,16 @@ def asignar_a_contrato_action(modeladmin, request, queryset):
 
 
 @admin.register(Equipo)
-class EquipoAdmin(admin.ModelAdmin):
+class EquipoAdmin(ImportadorArchivoMixin, admin.ModelAdmin):
     form = EquipoForm
     change_list_template = "admin/core/equipo/change_list.html"
+
+    importador_procesar_archivo = staticmethod(procesar_archivo_equipos)
+    importador_resumen_de = staticmethod(resumen_de_equipos)
+    importador_titulo = "Importar equipos"
+    importador_template = "admin/core/equipo/importar_equipos.html"
+    importador_plantilla = "plantilla_importar_equipos.csv"
+
     list_display = (
         "numero_serie",
         "marca",
@@ -680,12 +636,12 @@ class EquipoAdmin(admin.ModelAdmin):
         urls = [
             path(
                 "importar/",
-                self.admin_site.admin_view(self.importar_equipos_view),
+                self.admin_site.admin_view(self.importar_view),
                 name="core_equipo_importar",
             ),
             path(
                 "importar/plantilla/",
-                self.admin_site.admin_view(self.descargar_plantilla_view),
+                self.admin_site.admin_view(self.descargar_plantilla_importador_view),
                 name="core_equipo_importar_plantilla",
             ),
             path(
@@ -777,52 +733,6 @@ class EquipoAdmin(admin.ModelAdmin):
         }
         return render(request, "admin/core/equipo/asignar_masivo.html", contexto)
 
-    def importar_equipos_view(self, request):
-        if not self.has_add_permission(request):
-            raise PermissionDenied
-
-        resultados = None
-        resumen = None
-        dry_run = True
-
-        if request.method == "POST":
-            form = ImportarEquiposForm(request.POST, request.FILES)
-            if form.is_valid():
-                archivo = form.cleaned_data["archivo"]
-                dry_run = form.cleaned_data["dry_run"]
-                resultados = procesar_archivo_equipos(archivo, archivo.name, dry_run=dry_run)
-                if not resultados:
-                    messages.warning(request, "El archivo no tiene filas de datos.")
-                else:
-                    resumen = resumen_de_equipos(resultados)
-                    if dry_run:
-                        messages.info(request, "Validación en seco: no se guardó ningún cambio todavía.")
-                    elif resumen["con_error"]:
-                        messages.warning(
-                            request,
-                            f"Importación completada con {len(resumen['con_error'])} fila(s) con error.",
-                        )
-                    else:
-                        messages.success(request, f"Importación completada: {resumen['total']} fila(s) procesadas.")
-        else:
-            form = ImportarEquiposForm()
-
-        contexto = {
-            **self.admin_site.each_context(request),
-            "opts": self.model._meta,
-            "title": "Importar equipos",
-            "form": form,
-            "resultados": resultados,
-            "resumen": resumen,
-        }
-        return render(request, "admin/core/equipo/importar_equipos.html", contexto)
-
-    def descargar_plantilla_view(self, request):
-        if not self.has_add_permission(request):
-            raise PermissionDenied
-        ruta = Path(settings.BASE_DIR) / "plantillas" / "plantilla_importar_equipos.csv"
-        return FileResponse(open(ruta, "rb"), as_attachment=True, filename=ruta.name)
-
 
 class LecturaInline(admin.TabularInline):
     model = Lectura
@@ -913,7 +823,7 @@ class LecturaForm(forms.ModelForm):
 
 
 @admin.register(Lectura)
-class LecturaAdmin(admin.ModelAdmin):
+class LecturaAdmin(ImportadorArchivoMixin, admin.ModelAdmin):
     form = LecturaForm
     change_list_template = "admin/core/lectura/change_list.html"
     list_display = ("asignacion", "fecha", "lectura_bn", "lectura_color", "origen", "estado_auditoria")
@@ -923,6 +833,12 @@ class LecturaAdmin(admin.ModelAdmin):
     autocomplete_fields = ("asignacion",)
     date_hierarchy = "fecha"
 
+    importador_procesar_archivo = staticmethod(procesar_archivo_lecturas)
+    importador_resumen_de = staticmethod(resumen_de_lecturas)
+    importador_titulo = "Importar lecturas"
+    importador_template = "admin/core/lectura/importar_lecturas.html"
+    importador_plantilla = "plantilla_importar_lecturas.csv"
+
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
         _avisar_lecturas_con_anomalia(request, [obj])
@@ -931,61 +847,16 @@ class LecturaAdmin(admin.ModelAdmin):
         urls = [
             path(
                 "importar/",
-                self.admin_site.admin_view(self.importar_lecturas_view),
+                self.admin_site.admin_view(self.importar_view),
                 name="core_lectura_importar",
             ),
             path(
                 "importar/plantilla/",
-                self.admin_site.admin_view(self.descargar_plantilla_view),
+                self.admin_site.admin_view(self.descargar_plantilla_importador_view),
                 name="core_lectura_importar_plantilla",
             ),
         ]
         return urls + super().get_urls()
-
-    def importar_lecturas_view(self, request):
-        if not self.has_add_permission(request):
-            raise PermissionDenied
-
-        resultados = None
-        resumen = None
-
-        if request.method == "POST":
-            form = ImportarLecturasForm(request.POST, request.FILES)
-            if form.is_valid():
-                archivo = form.cleaned_data["archivo"]
-                dry_run = form.cleaned_data["dry_run"]
-                resultados = procesar_archivo_lecturas(archivo, archivo.name, dry_run=dry_run)
-                if not resultados:
-                    messages.warning(request, "El archivo no tiene filas de datos.")
-                else:
-                    resumen = resumen_de_lecturas(resultados)
-                    if dry_run:
-                        messages.info(request, "Validación en seco: no se guardó ningún cambio todavía.")
-                    elif resumen["con_error"]:
-                        messages.warning(
-                            request,
-                            f"Importación completada con {len(resumen['con_error'])} fila(s) con error.",
-                        )
-                    else:
-                        messages.success(request, f"Importación completada: {resumen['total']} fila(s) procesadas.")
-        else:
-            form = ImportarLecturasForm()
-
-        contexto = {
-            **self.admin_site.each_context(request),
-            "opts": self.model._meta,
-            "title": "Importar lecturas",
-            "form": form,
-            "resultados": resultados,
-            "resumen": resumen,
-        }
-        return render(request, "admin/core/lectura/importar_lecturas.html", contexto)
-
-    def descargar_plantilla_view(self, request):
-        if not self.has_add_permission(request):
-            raise PermissionDenied
-        ruta = Path(settings.BASE_DIR) / "plantillas" / "plantilla_importar_lecturas.csv"
-        return FileResponse(open(ruta, "rb"), as_attachment=True, filename=ruta.name)
 
 
 @admin.register(Factura)
